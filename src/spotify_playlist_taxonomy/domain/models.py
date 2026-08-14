@@ -56,7 +56,15 @@ class DecisionOrigin(StrEnum):
     USER_APPROVAL = "user_approval"
     USER_OVERRIDE = "user_override"
     USER_EXPLICIT = "user_explicit"
+
+
+class OperationalOrigin(StrEnum):
     SYSTEM_OPERATIONAL = "system_operational"
+
+
+class CalibrationPolarity(StrEnum):
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
 
 
 class AssignmentDecision(StrEnum):
@@ -114,6 +122,16 @@ def _validate_summary(value: str) -> None:
         )
 
 
+def _validate_nonblank(name: str, value: str) -> None:
+    if not value.strip():
+        raise ValueError(f"{name} must not be blank")
+
+
+def _validate_artists(artists: tuple[str, ...]) -> None:
+    if not artists or any(not artist.strip() for artist in artists):
+        raise ValueError("at least one nonblank artist is required")
+
+
 @dataclass(frozen=True, slots=True)
 class CanonicalTrack:
     canonical_track_id: str
@@ -121,8 +139,9 @@ class CanonicalTrack:
     display_artists: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not self.canonical_track_id or not self.display_title or not self.display_artists:
-            raise ValueError("canonical track requires an ID, title, and at least one artist")
+        _validate_nonblank("canonical_track_id", self.canonical_track_id)
+        _validate_nonblank("display_title", self.display_title)
+        _validate_artists(self.display_artists)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,8 +154,25 @@ class PlatformTrackIdentity:
     version_label: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.identity_id or not self.title or not self.artists:
-            raise ValueError("track identity requires an ID, title, and at least one artist")
+        _validate_nonblank("identity_id", self.identity_id)
+        _validate_nonblank("title", self.title)
+        _validate_artists(self.artists)
+        if self.provider_track_id is not None:
+            _validate_nonblank("provider_track_id", self.provider_track_id)
+        if self.version_label is not None:
+            _validate_nonblank("version_label", self.version_label)
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalTrackIdentityLink:
+    link_id: str
+    canonical_track_id: str
+    identity_id: str
+
+    def __post_init__(self) -> None:
+        _validate_nonblank("link_id", self.link_id)
+        _validate_nonblank("canonical_track_id", self.canonical_track_id)
+        _validate_nonblank("identity_id", self.identity_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,8 +185,34 @@ class TrackMatchAssessment:
 
     def __post_init__(self) -> None:
         _validate_confidence(self.confidence)
+        _validate_nonblank("left_identity_id", self.left_identity_id)
+        _validate_nonblank("right_identity_id", self.right_identity_id)
         if self.left_identity_id == self.right_identity_id:
             raise ValueError("a match assessment requires two distinct identity records")
+        if not self.basis or any(not item.strip() for item in self.basis):
+            raise ValueError("match basis must contain nonblank values")
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformPlaylistRegistration:
+    registration_id: str
+    provider: IdentityProvider
+    provider_playlist_id: str
+    role: PlaylistRole
+    logical_playlist_id: str | None = None
+    owner_account_id: str | None = None
+    display_name: str | None = None
+
+    def __post_init__(self) -> None:
+        _validate_nonblank("registration_id", self.registration_id)
+        _validate_nonblank("provider_playlist_id", self.provider_playlist_id)
+        for name, value in (
+            ("logical_playlist_id", self.logical_playlist_id),
+            ("owner_account_id", self.owner_account_id),
+            ("display_name", self.display_name),
+        ):
+            if value is not None:
+                _validate_nonblank(name, value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,8 +226,11 @@ class ResearchEvidence:
     confidence: float | None = None
 
     def __post_init__(self) -> None:
-        if not self.evidence_id or not self.normalized_value.strip():
-            raise ValueError("evidence requires an ID and normalized value")
+        _validate_nonblank("evidence_id", self.evidence_id)
+        _validate_nonblank("canonical_track_id", self.canonical_track_id)
+        _validate_nonblank("normalized_value", self.normalized_value)
+        if self.source_reference is not None:
+            _validate_nonblank("source_reference", self.source_reference)
         if self.confidence is not None:
             _validate_confidence(self.confidence)
 
@@ -185,6 +250,14 @@ class DerivedCharacteristic:
     def __post_init__(self) -> None:
         _validate_confidence(self.confidence)
         _validate_summary(self.justification_summary)
+        for name, value in (
+            ("characteristic_id", self.characteristic_id),
+            ("canonical_track_id", self.canonical_track_id),
+            ("name", self.name),
+            ("value", self.value),
+            ("derivation_version", self.derivation_version),
+        ):
+            _validate_nonblank(name, value)
         if self.origin is not CharacteristicOrigin.USER_EXPLICIT and not self.evidence_ids:
             raise ValueError("generated characteristics must reference evidence")
 
@@ -207,6 +280,14 @@ class ClassificationProposal:
     def __post_init__(self) -> None:
         _validate_confidence(self.confidence)
         _validate_summary(self.justification_summary)
+        for name, value in (
+            ("proposal_id", self.proposal_id),
+            ("canonical_track_id", self.canonical_track_id),
+            ("logical_playlist_id", self.logical_playlist_id),
+            ("taxonomy_version", self.taxonomy_version),
+            ("specification_version", self.specification_version),
+        ):
+            _validate_nonblank(name, value)
         if not self.logical_playlist_id.startswith(("genre.", "vibe.", "activity.")):
             raise ValueError("logical_playlist_id must use a known taxonomy dimension")
         if not (self.evidence_ids or self.characteristic_ids):
@@ -223,8 +304,28 @@ class UserDecision:
     sequence: int
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("decision_id", self.decision_id),
+            ("canonical_track_id", self.canonical_track_id),
+            ("logical_playlist_id", self.logical_playlist_id),
+        ):
+            _validate_nonblank(name, value)
         if self.sequence < 0:
             raise ValueError("sequence must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
+class CalibrationExample:
+    calibration_example_id: str
+    user_decision_id: str
+    logical_playlist_id: str
+    polarity: CalibrationPolarity
+    selected: bool = True
+
+    def __post_init__(self) -> None:
+        _validate_nonblank("calibration_example_id", self.calibration_example_id)
+        _validate_nonblank("user_decision_id", self.user_decision_id)
+        _validate_nonblank("logical_playlist_id", self.logical_playlist_id)
 
 
 @dataclass(frozen=True, slots=True)

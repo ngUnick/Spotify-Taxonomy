@@ -5,8 +5,8 @@ These rules apply throughout this repository.
 ## Phase boundaries
 
 - Stop at the phase requested by the user. Never begin a later phase implicitly.
-- Phase 0 is non-operational: no OAuth, network providers, database, live account access, real
-  classification, or Spotify mutations.
+- Phase 1 is local-only: no OAuth, network providers, live account access, real classification,
+  ingestion workflows, or Spotify mutations.
 
 ## Credentials and user data
 
@@ -51,11 +51,11 @@ These rules apply throughout this repository.
 
 - Keep ordinary unit tests offline, deterministic, and synthetic; no live service calls or credentials.
 - Maintain safety-invariant tests whenever domain policies change.
-- Prefer the standard library until a later phase justifies a dependency.
+- Keep dependencies limited to those approved for the active phase and keep `uv.lock` current.
 - Run from the repository root:
 
 ```powershell
-$env:PYTHONPATH = "src"
-python -m unittest discover -s tests -v
-python -m compileall -q src tests
+uv sync --locked
+uv run python -m unittest discover -s tests -v
+uv run python -m compileall -q src tests
 ```

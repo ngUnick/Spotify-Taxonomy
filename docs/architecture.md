@@ -1,7 +1,7 @@
 # Phase 0 architecture
 
-Status: approved baseline, 2026-08-14. This document describes V1 boundaries; only the Phase 0
-contracts and tests have been implemented.
+Status: Phase 1 foundation, 2026-08-14. Phase 0 boundaries remain authoritative; Phase 1 adds strict
+configuration, lazy local runtime paths, SQLite persistence, and foundational CLI/backup behavior.
 
 ## Design principles
 
@@ -65,11 +65,10 @@ The domain layer imports no Spotify, Codex, HTTP, database, or provider implemen
 classification ports do not depend on the platform writer. The synchronization planner does not call a
 classifier. Platform implementations map platform IDs to canonical IDs at their boundary.
 
-SQLite remains the expected V1 store, under `%LOCALAPPDATA%`, but its schema is a Phase 1 deliverable.
-Likely persisted concepts are canonical tracks, identity/match records, platform mappings, evidence and
-research status, characteristics, batch/item status, proposals, decisions, calibration selections,
-playlist registrations, desired assignments, and sync operations. Phase 0 intentionally does not create
-a database or migration.
+SQLite is the V1 store under the resolved per-user runtime root. Phase 1 persists established domain
+concepts only: taxonomy revisions, catalogue identities/mappings, match assessments, playlist registrations,
+evidence, characteristics, proposals, decisions, and calibration selections. Workflow-owned research jobs,
+classification batches, desired assignments, sync plans, and operation journals remain deferred.
 
 ## Batch and state boundaries
 

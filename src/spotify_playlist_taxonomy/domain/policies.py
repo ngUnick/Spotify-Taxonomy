@@ -23,7 +23,6 @@ from .models import (
 )
 
 _DECISION_PRECEDENCE = {
-    DecisionOrigin.SYSTEM_OPERATIONAL: 0,
     DecisionOrigin.USER_APPROVAL: 2,
     DecisionOrigin.USER_OVERRIDE: 3,
     DecisionOrigin.USER_EXPLICIT: 3,
@@ -101,13 +100,16 @@ def resolve_effective_assignment(
 ) -> EffectiveAssignment | None:
     proposal_list = list(proposals)
     decision_list = list(decisions)
-    user_decisions = [
-        item for item in decision_list if item.origin is not DecisionOrigin.SYSTEM_OPERATIONAL
-    ]
+    assignment_keys = {
+        (item.canonical_track_id, item.logical_playlist_id)
+        for item in (*proposal_list, *decision_list)
+    }
+    if len(assignment_keys) > 1:
+        raise ValueError("assignment resolution requires one track/playlist scope")
 
-    if user_decisions:
+    if decision_list:
         winner = max(
-            user_decisions,
+            decision_list,
             key=lambda item: (_DECISION_PRECEDENCE[item.origin], item.sequence),
         )
         return EffectiveAssignment(winner.decision, winner.origin, False, winner.decision_id)
@@ -126,9 +128,6 @@ def resolve_effective_assignment(
             winner.proposal_id,
         )
 
-    if decision_list:
-        winner = max(decision_list, key=lambda item: item.sequence)
-        return EffectiveAssignment(winner.decision, winner.origin, False, winner.decision_id)
     return None
 
 

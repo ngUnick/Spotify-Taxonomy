@@ -17,13 +17,13 @@ build/
 *credentials*
 
 # User/runtime state (must never become repository fixtures)
-runtime/
-data/
-classification_batches/
-classification_results/
-exports/
-backups/
-logs/
+/runtime/
+/data/
+/classification_batches/
+/classification_results/
+/exports/
+/backups/
+/logs/
 *.db
 *.db-*
 *.sqlite

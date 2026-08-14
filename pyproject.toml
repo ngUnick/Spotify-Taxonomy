@@ -9,7 +9,14 @@ description = "Policy-first foundations for a personal, reviewable music classif
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "Proprietary - personal project" }
-dependencies = []
+dependencies = [
+    "pydantic>=2.11,<3",
+    "pyyaml>=6.0.2,<7",
+    "typer>=0.16,<1",
+]
+
+[project.scripts]
+spotify-taxonomy = "spotify_playlist_taxonomy.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/spotify_playlist_taxonomy"]

@@ -6,6 +6,7 @@ from spotify_playlist_taxonomy.domain.models import (
     AssignmentDecision,
     ClassificationProposal,
     DecisionOrigin,
+    OperationalOrigin,
     ProposalOrigin,
     ReviewStatus,
     UserDecision,
@@ -53,13 +54,9 @@ class DecisionPrecedenceTests(unittest.TestCase):
         self.assertEqual(AssignmentDecision.EXCLUDE, result.decision)
         self.assertEqual(DecisionOrigin.USER_APPROVAL, result.origin)
 
-    def test_system_operational_state_does_not_override_generated_proposal(self) -> None:
-        result = resolve_effective_assignment(
-            [proposal(AssignmentDecision.INCLUDE)],
-            [decision(DecisionOrigin.SYSTEM_OPERATIONAL, AssignmentDecision.EXCLUDE, 99)],
-        )
-        self.assertEqual(AssignmentDecision.INCLUDE, result.decision)
-        self.assertEqual(ProposalOrigin.CODEX_CLASSIFIER, result.origin)
+    def test_system_operational_origin_is_separate_from_user_decisions(self) -> None:
+        self.assertNotIn("system_operational", {item.value for item in DecisionOrigin})
+        self.assertEqual("system_operational", OperationalOrigin.SYSTEM_OPERATIONAL.value)
 
     def test_explicit_override_outweighs_later_approval(self) -> None:
         result = resolve_effective_assignment(
@@ -95,10 +92,16 @@ class DecisionPrecedenceTests(unittest.TestCase):
 
     def test_calibration_requires_explicit_selection_and_reviewed_origin(self) -> None:
         reviewed = decision(DecisionOrigin.USER_APPROVAL, AssignmentDecision.INCLUDE, 1)
-        operational = decision(DecisionOrigin.SYSTEM_OPERATIONAL, AssignmentDecision.INCLUDE, 2)
         self.assertTrue(is_explicit_calibration_example(reviewed, True))
         self.assertFalse(is_explicit_calibration_example(reviewed, False))
-        self.assertFalse(is_explicit_calibration_example(operational, True))
+
+    def test_mixed_assignment_scopes_are_rejected(self) -> None:
+        other = UserDecision(
+            "decision.synthetic.other", "track.synthetic.other", "activity.coding_focus",
+            AssignmentDecision.EXCLUDE, DecisionOrigin.USER_EXPLICIT, 1,
+        )
+        with self.assertRaisesRegex(ValueError, "one track/playlist scope"):
+            resolve_effective_assignment([proposal(AssignmentDecision.INCLUDE)], [other])
 
 
 if __name__ == "__main__":

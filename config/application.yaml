@@ -1,0 +1,6 @@
+schema_version: "1"
+taxonomy_path: taxonomy.yaml
+database_filename: app.db
+log_level: INFO
+file_logging: false
+backup_retention_count: 5
