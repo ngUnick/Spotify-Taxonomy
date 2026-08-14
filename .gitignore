@@ -1,0 +1,36 @@
+# Python build/runtime artifacts
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*token*
+*credentials*
+
+# User/runtime state (must never become repository fixtures)
+runtime/
+data/
+classification_batches/
+classification_results/
+exports/
+backups/
+logs/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Editors and operating systems
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

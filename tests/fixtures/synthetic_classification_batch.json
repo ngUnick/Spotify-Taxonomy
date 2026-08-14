@@ -1,0 +1,37 @@
+{
+  "schema_version": "phase0.synthetic.v1",
+  "batch_id": "batch.synthetic.0001",
+  "taxonomy_version": "taxonomy.synthetic.v1",
+  "specification_version": "spec.synthetic.v1",
+  "tracks": [
+    {
+      "canonical_track_id": "track.synthetic.neon_orbit.studio",
+      "title": "Neon Orbit",
+      "artists": ["The Invented Signals"],
+      "evidence": [
+        {
+          "evidence_id": "evidence.synthetic.001",
+          "source": "publication",
+          "kind": "editorial_description",
+          "normalized_value": "driving electronic-rock rhythm with a bright chorus"
+        }
+      ],
+      "characteristics": [
+        {
+          "characteristic_id": "characteristic.synthetic.001",
+          "origin": "codex_interpretation",
+          "evidence_ids": ["evidence.synthetic.001"],
+          "name": "energy",
+          "value": "high"
+        }
+      ]
+    },
+    {
+      "canonical_track_id": "track.synthetic.neon_orbit.live",
+      "title": "Neon Orbit",
+      "artists": ["The Invented Signals"],
+      "version_label": "Live at Aurora Hall",
+      "evidence": []
+    }
+  ]
+}
