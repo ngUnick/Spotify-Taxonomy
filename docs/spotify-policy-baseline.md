@@ -69,7 +69,17 @@ exhaustion. Natural pauses while local research/review occurs require no Spotify
 Spotify's [PKCE guide](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow) and
 [redirect URI rules](https://developer.spotify.com/documentation/web-api/concepts/redirect_uri) support a
 desktop client without a client secret, an S256 challenge, random state, and an IPv4 loopback callback.
-Register `http://127.0.0.1/callback`; Phase 2 chooses its port transiently after binding to loopback.
+Register `http://127.0.0.1:8888/callback` by default, or the exact URI containing an explicitly configured
+alternate port. Phase 2 binds that fixed port and never falls back to an ephemeral or different port.
+
+### August 2026 redirect compatibility finding
+
+Spotify's published Redirect URI guidance describes portless loopback registration with dynamically assigned
+ports. During the first controlled live checkpoint in August 2026, however, the live app-creation dashboard
+rejected `http://127.0.0.1/callback` as insecure and accepted `http://127.0.0.1:8888/callback`. For practical
+interoperability, this project deliberately uses an exact fixed-port loopback registration. Authorization and
+authorization-code exchange use the same URI, and an occupied configured port fails closed rather than
+silently selecting another one.
 
 The exact Phase 2 scopes are `user-read-private`, `playlist-read-private`,
 `playlist-read-collaborative`, and `user-library-read`. No email or modify scope is requested. Access tokens

@@ -6,11 +6,15 @@ each live checkpoint still requires explicit approval.
 ## Dashboard configuration
 
 1. Create/select the personal Development Mode application in Spotify for Developers.
-2. Register the redirect URI exactly as `http://127.0.0.1/callback`. Do not use `localhost`.
+2. Register the redirect URI exactly as `http://127.0.0.1:8888/callback`. Do not use `localhost`.
+   If `spotify.callback_port` or `spotify auth login --callback-port` selects another port, register the
+   exact equivalent URI containing that same port before login.
 3. Keep the Client ID in `SPOTIFY_CLIENT_ID` or pass `--client-id`. Do not create or configure a client secret.
 4. Do not put tokens, the Client ID, or authorization responses in repository configuration.
 
-The application binds `127.0.0.1` on an ephemeral port for each login. It requests exactly:
+The application binds exactly `127.0.0.1:<callback_port>` and never falls back to another port. The default
+port is `8888`; valid configured ports are `1024` through `65535`. If the port is unavailable, login fails
+closed so the local listener cannot diverge from the Redirect URI registered in Spotify. It requests exactly:
 
 ```text
 user-read-private
@@ -24,6 +28,7 @@ user-library-read
 ```powershell
 spotify-taxonomy spotify auth status
 spotify-taxonomy spotify auth login
+spotify-taxonomy spotify auth login --callback-port 9443
 spotify-taxonomy spotify auth login --no-browser
 spotify-taxonomy spotify auth logout
 spotify-taxonomy spotify check
@@ -32,6 +37,9 @@ spotify-taxonomy spotify check
 `--no-browser` prints the complete, short-lived authorization URL directly to the local terminal so the user
 can open it. That URL is never logged or persisted. The PKCE verifier is never printed. Ordinary output masks
 Client ID and account identifiers.
+
+The callback-port precedence is command-level `--callback-port`, then `spotify.callback_port` in application
+configuration, then the default `8888`. Authorization and token exchange use the identical exact redirect URI.
 
 `spotify check` performs only token refresh when needed and `GET /me`; do not run it before the separately
 approved real-authentication checkpoint. Playlist and saved-track reads are library interfaces for Phase 3,

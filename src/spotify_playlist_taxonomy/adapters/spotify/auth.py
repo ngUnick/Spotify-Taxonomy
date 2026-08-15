@@ -15,7 +15,12 @@ import webbrowser
 
 import httpx
 
-from .callback import AuthorizationCallback, LoopbackCallbackServer
+from .callback import (
+    AuthorizationCallback,
+    DEFAULT_CALLBACK_PORT,
+    LoopbackCallbackServer,
+    validate_callback_port,
+)
 from .credentials import CredentialEnvelope, CredentialStore
 from .errors import SpotifyAdapterError, SpotifyErrorKind
 
@@ -69,8 +74,8 @@ def mask_identifier(value: str) -> str:
     return f"{value[:4]}…{value[-4:]}"
 
 
-def _default_callback_factory() -> AuthorizationCallback:
-    return LoopbackCallbackServer()
+def _default_callback_factory(port: int) -> AuthorizationCallback:
+    return LoopbackCallbackServer(port)
 
 
 class SpotifyAuthManager:
@@ -83,7 +88,8 @@ class SpotifyAuthManager:
         credential_store: CredentialStore,
         http_client: httpx.Client,
         callback_timeout_seconds: float = 300,
-        callback_factory: Callable[[], AuthorizationCallback] = _default_callback_factory,
+        callback_port: int = DEFAULT_CALLBACK_PORT,
+        callback_factory: Callable[[int], AuthorizationCallback] = _default_callback_factory,
         browser_open: Callable[[str], bool] = webbrowser.open,
         authorization_url_sink: Callable[[str], None] = lambda value: None,
         warning_sink: Callable[[str], None] = lambda value: None,
@@ -91,10 +97,12 @@ class SpotifyAuthManager:
     ) -> None:
         if not client_id.strip():
             raise SpotifyAdapterError(SpotifyErrorKind.CONFIGURATION, "Spotify Client ID is required")
+        validate_callback_port(callback_port)
         self._client_id = client_id
         self._credentials = credential_store
         self._http = http_client
         self._callback_timeout = callback_timeout_seconds
+        self._callback_port = callback_port
         self._callback_factory = callback_factory
         self._browser_open = browser_open
         self._authorization_url_sink = authorization_url_sink
@@ -109,19 +117,19 @@ class SpotifyAuthManager:
         return AuthorizationStatus(True, stored.scopes, stored.authorized_at)
 
     def login(self, *, no_browser: bool = False) -> AccessToken:
-        callback = self._callback_factory()
+        callback = self._callback_factory(self._callback_port)
         state: str | None = None
         verifier: str | None = None
         challenge: str | None = None
         authorization_url: str | None = None
+        redirect_uri: str | None = None
         result = None
         try:
             state = secrets.token_urlsafe(32)
             verifier = secrets.token_urlsafe(64)
             challenge = _pkce_challenge(verifier)
-            authorization_url = _authorization_url(
-                self._client_id, callback.redirect_uri, state, challenge
-            )
+            redirect_uri = callback.redirect_uri
+            authorization_url = _authorization_url(self._client_id, redirect_uri, state, challenge)
             if no_browser:
                 self._authorization_url_sink(authorization_url)
             elif not self._browser_open(authorization_url):
@@ -152,7 +160,7 @@ class SpotifyAuthManager:
                     "client_id": self._client_id,
                     "grant_type": "authorization_code",
                     "code": result.code,
-                    "redirect_uri": callback.redirect_uri,
+                    "redirect_uri": redirect_uri,
                     "code_verifier": verifier,
                 }
             )
@@ -180,7 +188,7 @@ class SpotifyAuthManager:
             callback.close()
             # Make the intended lifetime explicit; values are never persisted or logged.
             result = None
-            state = verifier = challenge = authorization_url = None
+            state = verifier = challenge = authorization_url = redirect_uri = None
 
     def logout(self) -> bool:
         self._access_token = None

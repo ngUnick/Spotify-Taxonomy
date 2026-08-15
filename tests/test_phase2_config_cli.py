@@ -67,12 +67,63 @@ class Phase2ConfigurationCliTests(unittest.TestCase):
         self.assertEqual(20, config.spotify.request_timeout_seconds)
         self.assertEqual(3, config.spotify.max_read_attempts)
         self.assertEqual(300, config.spotify.callback_timeout_seconds)
+        self.assertEqual(8888, config.spotify.callback_port)
+        configured = ApplicationConfig.model_validate({
+            "schema_version": "2",
+            "taxonomy_path": "taxonomy.yaml",
+            "spotify": {"callback_port": 9443},
+        })
+        self.assertEqual(9443, configured.spotify.callback_port)
         with self.assertRaises(ValidationError):
             ApplicationConfig.model_validate({
                 "schema_version": "2",
                 "taxonomy_path": "taxonomy.yaml",
                 "spotify": {"max_read_attempts": 11},
             })
+        for invalid in (0, 1023, 65536, True, "8888"):
+            with self.subTest(callback_port=invalid), self.assertRaises(ValidationError):
+                ApplicationConfig.model_validate({
+                    "schema_version": "2",
+                    "taxonomy_path": "taxonomy.yaml",
+                    "spotify": {"callback_port": invalid},
+                })
+
+    def test_login_callback_port_cli_override_precedence(self) -> None:
+        configured = ApplicationConfig.model_validate({
+            "schema_version": "2",
+            "taxonomy_path": "taxonomy.yaml",
+            "spotify": {"callback_port": 9443},
+        })
+        with patch.dict("os.environ", {"SPOTIFY_CLIENT_ID": "synthetic-client-id"}), patch(
+            "spotify_playlist_taxonomy.cli._load_documents",
+            return_value=(configured, object(), Path("synthetic-taxonomy.yaml")),
+        ), patch(
+            "spotify_playlist_taxonomy.cli._spotify_http_client", return_value=_ContextClient()
+        ), patch(
+            "spotify_playlist_taxonomy.cli.WindowsCredentialStore", return_value=object()
+        ), patch(
+            "spotify_playlist_taxonomy.cli.SpotifyAuthManager", return_value=_Manager()
+        ) as manager_type:
+            configured_result = RUNNER.invoke(
+                app, ["spotify", "auth", "login", "--config", str(CONFIG)]
+            )
+            overridden_result = RUNNER.invoke(app, [
+                "spotify", "auth", "login", "--callback-port", "9555",
+                "--config", str(CONFIG),
+            ])
+
+        self.assertEqual(0, configured_result.exit_code, configured_result.output)
+        self.assertEqual(0, overridden_result.exit_code, overridden_result.output)
+        self.assertEqual(9443, manager_type.call_args_list[0].kwargs["callback_port"])
+        self.assertEqual(9555, manager_type.call_args_list[1].kwargs["callback_port"])
+
+    def test_login_rejects_invalid_cli_callback_port(self) -> None:
+        result = RUNNER.invoke(app, [
+            "spotify", "auth", "login", "--callback-port", "1023",
+            "--config", str(CONFIG),
+        ])
+        self.assertNotEqual(0, result.exit_code)
+        self.assertIn("1024", result.output)
 
     def test_secret_and_client_id_fields_remain_forbidden(self) -> None:
         for field in ("client_secret", "client_id", "refresh_token"):

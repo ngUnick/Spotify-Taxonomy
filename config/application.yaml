@@ -8,3 +8,4 @@ spotify:
   request_timeout_seconds: 20
   max_read_attempts: 3
   callback_timeout_seconds: 300
+  callback_port: 8888

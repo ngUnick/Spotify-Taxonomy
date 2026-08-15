@@ -109,6 +109,7 @@ def _spotify_auth_manager(
     client_id: str,
     http_client: httpx.Client,
     *,
+    callback_port: int | None = None,
     authorization_url_sink: Callable[[str], None] | None = None,
 ) -> SpotifyAuthManager:
     sink = authorization_url_sink or (lambda value: None)
@@ -117,6 +118,7 @@ def _spotify_auth_manager(
         credential_store=WindowsCredentialStore(),
         http_client=http_client,
         callback_timeout_seconds=config.spotify.callback_timeout_seconds,
+        callback_port=config.spotify.callback_port if callback_port is None else callback_port,
         authorization_url_sink=sink,
         warning_sink=lambda message: typer.echo(f"Warning: {message}", err=True),
     )
@@ -311,6 +313,13 @@ def spotify_auth_status(
 @spotify_auth_app.command("login")
 def spotify_auth_login(
     client_id: str | None = typer.Option(None, "--client-id"),
+    callback_port: int | None = typer.Option(
+        None,
+        "--callback-port",
+        min=1024,
+        max=65535,
+        help="Fixed loopback port registered in the Spotify Developer Dashboard.",
+    ),
     no_browser: bool = typer.Option(False, "--no-browser"),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
 ) -> None:
@@ -320,7 +329,11 @@ def spotify_auth_login(
         resolved = resolve_client_id(client_id)
         with _spotify_http_client(config) as http_client:
             manager = _spotify_auth_manager(
-                config, resolved, http_client, authorization_url_sink=typer.echo
+                config,
+                resolved,
+                http_client,
+                callback_port=callback_port,
+                authorization_url_sink=typer.echo,
             )
             token = manager.login(no_browser=no_browser)
         typer.echo(f"Authorized: client_id={mask_identifier(resolved)}")

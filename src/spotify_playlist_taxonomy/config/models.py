@@ -37,6 +37,7 @@ class SpotifyRuntimeConfig(StrictModel):
     request_timeout_seconds: float = Field(default=20, ge=1, le=120)
     max_read_attempts: int = Field(default=3, ge=1, le=10)
     callback_timeout_seconds: float = Field(default=300, ge=30, le=900)
+    callback_port: int = Field(default=8888, ge=1024, le=65535, strict=True)
 
 
 class ApplicationConfig(StrictModel):

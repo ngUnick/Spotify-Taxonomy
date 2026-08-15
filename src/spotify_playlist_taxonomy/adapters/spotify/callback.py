@@ -12,6 +12,9 @@ from .errors import SpotifyAdapterError, SpotifyErrorKind
 
 CALLBACK_HOST = "127.0.0.1"
 CALLBACK_PATH = "/callback"
+DEFAULT_CALLBACK_PORT = 8888
+MIN_CALLBACK_PORT = 1024
+MAX_CALLBACK_PORT = 65535
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +36,12 @@ class AuthorizationCallback(Protocol):
 class LoopbackCallbackServer:
     """Single-flow HTTP listener bound only to the IPv4 loopback interface."""
 
-    def __init__(self, monotonic: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        port: int = DEFAULT_CALLBACK_PORT,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        validate_callback_port(port)
         self._result: CallbackResult | None = None
         self._monotonic = monotonic
         outer = self
@@ -60,7 +68,14 @@ class LoopbackCallbackServer:
             def log_message(self, format: str, *args: object) -> None:
                 del format, args
 
-        self._server = HTTPServer((CALLBACK_HOST, 0), Handler)
+        try:
+            self._server = HTTPServer((CALLBACK_HOST, port), Handler)
+        except OSError:
+            raise SpotifyAdapterError(
+                SpotifyErrorKind.CONFIGURATION,
+                f"Unable to bind the Spotify callback listener on configured port {port}; "
+                "the port must be available and match the Redirect URI registered in Spotify",
+            ) from None
 
     @property
     def redirect_uri(self) -> str:
@@ -87,3 +102,15 @@ class LoopbackCallbackServer:
 def _one(values: dict[str, list[str]], name: str) -> str | None:
     items = values.get(name)
     return items[0] if items and len(items) == 1 else None
+
+
+def validate_callback_port(port: int) -> None:
+    if (
+        isinstance(port, bool)
+        or not isinstance(port, int)
+        or not MIN_CALLBACK_PORT <= port <= MAX_CALLBACK_PORT
+    ):
+        raise SpotifyAdapterError(
+            SpotifyErrorKind.CONFIGURATION,
+            f"Spotify callback port must be between {MIN_CALLBACK_PORT} and {MAX_CALLBACK_PORT}",
+        )

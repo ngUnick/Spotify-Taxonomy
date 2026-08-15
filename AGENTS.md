@@ -17,6 +17,9 @@ These rules apply throughout this repository.
   output and out of YAML, SQLite, logs, errors, and reports. PKCE state/verifier/challenge, callback URI,
   authorization URL, and code are transient login-flow values only. `--no-browser` may print the full
   authorization URL to the local terminal; the verifier is never displayed.
+- Spotify PKCE uses an exact fixed IPv4 loopback callback port (default `8888`, configurable). Bind only
+  `127.0.0.1` on that port, use the identical redirect URI for authorization and token exchange, and fail
+  closed if it cannot be bound. Never select an ephemeral or fallback port.
 - Refresh tokens use only the verified core Windows Credential Locker backend supplied by the approved
   `keyring` version. Never accept configured third-party/file/null/fail backends or plaintext fallback.
 - Never commit real runtime catalogues, account/API dumps, playlist exports, classification batches,

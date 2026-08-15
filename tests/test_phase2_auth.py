@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlsplit
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import _bootstrap  # noqa: F401
 import httpx
@@ -14,6 +14,11 @@ from spotify_playlist_taxonomy.adapters.spotify.auth import (
     resolve_client_id,
 )
 from spotify_playlist_taxonomy.adapters.spotify.callback import CallbackResult
+from spotify_playlist_taxonomy.adapters.spotify.callback import (
+    CALLBACK_HOST,
+    DEFAULT_CALLBACK_PORT,
+    LoopbackCallbackServer,
+)
 from spotify_playlist_taxonomy.adapters.spotify.credentials import CredentialEnvelope
 from spotify_playlist_taxonomy.adapters.spotify.errors import SpotifyAdapterError, SpotifyErrorKind
 
@@ -43,10 +48,9 @@ class FakeStore:
 
 
 class FakeCallback:
-    redirect_uri = "http://127.0.0.1:54321/callback"
-
-    def __init__(self, result: CallbackResult) -> None:
+    def __init__(self, result: CallbackResult, port: int = DEFAULT_CALLBACK_PORT) -> None:
         self.result = result
+        self.redirect_uri = f"http://127.0.0.1:{port}/callback"
         self.closed = False
 
     def wait(self, timeout_seconds: float) -> CallbackResult:
@@ -58,6 +62,33 @@ class FakeCallback:
 
 
 class AuthenticationTests(unittest.TestCase):
+    def test_callback_server_binds_exact_default_and_configured_ports(self) -> None:
+        for port in (DEFAULT_CALLBACK_PORT, 9443):
+            with self.subTest(port=port), patch(
+                "spotify_playlist_taxonomy.adapters.spotify.callback.HTTPServer"
+            ) as server_type:
+                server_type.return_value.server_port = port
+                callback = LoopbackCallbackServer(port)
+                server_type.assert_called_once_with((CALLBACK_HOST, port), ANY)
+                self.assertEqual(f"http://127.0.0.1:{port}/callback", callback.redirect_uri)
+                callback.close()
+
+    def test_callback_bind_failure_has_no_port_fallback(self) -> None:
+        with patch(
+            "spotify_playlist_taxonomy.adapters.spotify.callback.HTTPServer",
+            side_effect=OSError("synthetic occupied port"),
+        ) as server_type, self.assertRaises(SpotifyAdapterError) as raised:
+            LoopbackCallbackServer(8888)
+        self.assertEqual(SpotifyErrorKind.CONFIGURATION, raised.exception.kind)
+        self.assertIn("configured port 8888", str(raised.exception))
+        self.assertIn("registered", str(raised.exception))
+        server_type.assert_called_once_with((CALLBACK_HOST, 8888), ANY)
+
+    def test_callback_port_validation_fails_closed(self) -> None:
+        for invalid in (0, 1023, 65536, True):
+            with self.subTest(port=invalid), self.assertRaises(SpotifyAdapterError):
+                LoopbackCallbackServer(invalid)
+
     def test_exact_required_scopes(self) -> None:
         self.assertEqual(
             (
@@ -84,6 +115,11 @@ class AuthenticationTests(unittest.TestCase):
         callback = FakeCallback(CallbackResult("synthetic-state", "synthetic-code", None))
         displayed: list[str] = []
         requests: list[httpx.Request] = []
+        callback_ports: list[int] = []
+
+        def callback_factory(port: int) -> FakeCallback:
+            callback_ports.append(port)
+            return callback
 
         def handler(request: httpx.Request) -> httpx.Response:
             requests.append(request)
@@ -100,7 +136,7 @@ class AuthenticationTests(unittest.TestCase):
                 credential_store=store,
                 http_client=client,
                 callback_timeout_seconds=123,
-                callback_factory=lambda: callback,
+                callback_factory=callback_factory,
                 browser_open=lambda url: self.fail("browser should not open"),
                 authorization_url_sink=displayed.append,
                 now=lambda: NOW,
@@ -114,14 +150,17 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual("synthetic-access-token", token.value)
         self.assertTrue(callback.closed)
         self.assertEqual(123, callback.timeout_seconds)
+        self.assertEqual([DEFAULT_CALLBACK_PORT], callback_ports)
         self.assertEqual(1, len(displayed))
         query = parse_qs(urlsplit(displayed[0]).query)
         self.assertEqual([CLIENT_ID], query["client_id"])
         self.assertEqual(["synthetic-state"], query["state"])
         self.assertEqual([_pkce_challenge("synthetic-verifier")], query["code_challenge"])
+        self.assertEqual([callback.redirect_uri], query["redirect_uri"])
         self.assertNotIn("synthetic-verifier", displayed[0])
         form = parse_qs(requests[0].content.decode())
         self.assertEqual(["synthetic-verifier"], form["code_verifier"])
+        self.assertEqual([callback.redirect_uri], form["redirect_uri"])
         self.assertNotIn("client_secret", form)
         self.assertEqual("synthetic-refresh-token", store.credential.refresh_token)
 
@@ -132,7 +171,7 @@ class AuthenticationTests(unittest.TestCase):
                 client_id=CLIENT_ID,
                 credential_store=FakeStore(),
                 http_client=client,
-                callback_factory=lambda: callback,
+                callback_factory=lambda port: callback,
                 authorization_url_sink=lambda url: None,
             )
             with patch(
@@ -151,7 +190,7 @@ class AuthenticationTests(unittest.TestCase):
                 client_id=CLIENT_ID,
                 credential_store=FakeStore(),
                 http_client=client,
-                callback_factory=lambda: callback,
+                callback_factory=lambda port: callback,
                 authorization_url_sink=lambda url: None,
             )
             with patch(
