@@ -1,3 +1,4 @@
+from io import BytesIO, TextIOWrapper
 from pathlib import Path
 import tempfile
 import unittest
@@ -5,7 +6,7 @@ import unittest
 import _bootstrap  # noqa: F401
 from typer.testing import CliRunner
 
-from spotify_playlist_taxonomy.cli import app
+from spotify_playlist_taxonomy.cli import _render_cli_text, _safe_echo, app
 from spotify_playlist_taxonomy.persistence import apply_migrations, connect_database
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 
@@ -76,6 +77,37 @@ class Phase3CliTests(unittest.TestCase):
         self.assertIn("bound: true", result.output)
         self.assertNotIn("synthetic-account-identifier", result.output)
         self.assertNotIn("synthetic-user-identifier", result.output)
+
+    def test_unicode_metadata_renders_unchanged_on_utf8_output(self) -> None:
+        original = "Synthetic 💯 — Ελληνικά — Café — 東京"
+        output = BytesIO()
+        stream = TextIOWrapper(output, encoding="utf-8", errors="strict")
+        try:
+            _safe_echo(original, file=stream)
+            stream.flush()
+            rendered = output.getvalue().decode("utf-8")
+        finally:
+            stream.detach()
+        self.assertEqual([original], rendered.splitlines())
+        self.assertEqual("Synthetic 💯 — Ελληνικά — Café — 東京", original)
+
+    def test_restrictive_windows_output_uses_readable_deterministic_fallback(self) -> None:
+        original = "Synthetic 💯 — Ελληνικά — Café — 東京"
+        output = BytesIO()
+        stream = TextIOWrapper(output, encoding="cp1252", errors="strict")
+        try:
+            _safe_echo(original, file=stream)
+            stream.flush()
+            rendered = output.getvalue().decode("cp1252")
+        finally:
+            stream.detach()
+        expected = _render_cli_text(original, "cp1252")
+        self.assertEqual([expected], rendered.splitlines())
+        self.assertIn(r"\U0001f4af", rendered)
+        self.assertIn(r"\u0395", rendered)
+        self.assertIn("Café", rendered)
+        self.assertIn(r"\u6771\u4eac", rendered)
+        self.assertEqual("Synthetic 💯 — Ελληνικά — Café — 東京", original)
 
 
 if __name__ == "__main__":

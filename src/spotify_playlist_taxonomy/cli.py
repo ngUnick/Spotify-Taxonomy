@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Iterator, TextIO
 
 import httpx
 import typer
@@ -111,8 +112,33 @@ def _configure_file_logging(config: ApplicationConfig, paths: RuntimePaths) -> N
 
 
 def _fail(error: Exception) -> None:
-    typer.echo(f"Error: {error}", err=True)
+    _safe_echo(f"Error: {error}", err=True)
     raise typer.Exit(code=1)
+
+
+def _render_cli_text(message: object, encoding: str | None) -> str:
+    """Render safely without mutating the underlying Unicode source text."""
+
+    text = str(message)
+    selected_encoding = encoding or "utf-8"
+    try:
+        text.encode(selected_encoding, errors="strict")
+    except LookupError:
+        selected_encoding = "utf-8"
+    except UnicodeEncodeError:
+        return text.encode(
+            selected_encoding, errors="backslashreplace"
+        ).decode(selected_encoding, errors="strict")
+    return text
+
+
+def _safe_echo(
+    message: object = "", *, err: bool = False, file: TextIO | None = None
+) -> None:
+    """Write deliberate CLI text to UTF-capable or restricted output streams."""
+
+    stream = file if file is not None else (sys.stderr if err else sys.stdout)
+    typer.echo(_render_cli_text(message, getattr(stream, "encoding", None)), file=stream)
 
 
 def _spotify_http_client(config: ApplicationConfig) -> httpx.Client:
@@ -140,7 +166,7 @@ def _spotify_auth_manager(
         callback_timeout_seconds=config.spotify.callback_timeout_seconds,
         callback_port=config.spotify.callback_port if callback_port is None else callback_port,
         authorization_url_sink=sink,
-        warning_sink=lambda message: typer.echo(f"Warning: {message}", err=True),
+        warning_sink=lambda message: _safe_echo(f"Warning: {message}", err=True),
     )
 
 
@@ -517,11 +543,11 @@ def spotify_source_discover(
         with _phase3_online(config_path, data_dir, client_id) as coordinator:
             discovered = coordinator.discover_playlists()
         for item, ownership in discovered:
-            typer.echo(
+            _safe_echo(
                 f"{item.playlist_id}\t{ownership.value}\t"
                 f"collaborative={item.collaborative}\t{item.name}"
             )
-        typer.echo(f"Discovered: {len(discovered)} (not persisted)")
+        _safe_echo(f"Discovered: {len(discovered)} (not persisted)")
     except (
         OSError, ValueError, ValidationError, PersistenceError,
         Phase3StateError, SpotifyAdapterError,
@@ -689,14 +715,14 @@ def catalogue_identity_show(
     try:
         with _phase3_store(config_path, data_dir) as (_, _, store):
             value = _phase3_review(store).identity(identity_id)
-        typer.echo(f"identity_id: {value.identity.identity_id}")
-        typer.echo(f"title: {value.identity.title}")
-        typer.echo(f"artists: {', '.join(value.identity.artists)}")
-        typer.echo(f"version: {value.identity.version_label or '-'}")
-        typer.echo(
+        _safe_echo(f"identity_id: {value.identity.identity_id}")
+        _safe_echo(f"title: {value.identity.title}")
+        _safe_echo(f"artists: {', '.join(value.identity.artists)}")
+        _safe_echo(f"version: {value.identity.version_label or '-'}")
+        _safe_echo(
             f"linked_canonical: {value.linked_canonical.canonical_track_id if value.linked_canonical else '-'}"
         )
-        typer.echo(f"candidates: {len(value.candidates)}")
+        _safe_echo(f"candidates: {len(value.candidates)}")
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
         _fail(error)
 
@@ -732,16 +758,16 @@ def catalogue_match_show(
         with _phase3_store(config_path, data_dir) as (_, _, store):
             value = _phase3_review(store).candidate(candidate_id)
         candidate = value.candidate
-        typer.echo(f"candidate_id: {candidate.candidate_id}")
-        typer.echo(f"state: {candidate.state.value}")
-        typer.echo(f"action: {candidate.action.value}")
-        typer.echo(f"identity: {value.identity.title} — {', '.join(value.identity.artists)}")
-        typer.echo(f"identity_version: {value.identity.version_label or '-'}")
-        typer.echo(
+        _safe_echo(f"candidate_id: {candidate.candidate_id}")
+        _safe_echo(f"state: {candidate.state.value}")
+        _safe_echo(f"action: {candidate.action.value}")
+        _safe_echo(f"identity: {value.identity.title} — {', '.join(value.identity.artists)}")
+        _safe_echo(f"identity_version: {value.identity.version_label or '-'}")
+        _safe_echo(
             "canonical: -" if value.canonical is None else
             f"canonical: {value.canonical.display_title} — {', '.join(value.canonical.artists)}"
         )
-        typer.echo(f"basis: {', '.join(candidate.basis)}")
+        _safe_echo(f"basis: {', '.join(candidate.basis)}")
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
         _fail(error)
 
@@ -811,7 +837,7 @@ def catalogue_link_list(
         with _phase3_store(config_path, data_dir) as (_, _, store):
             links = _phase3_review(store).links()
         for value in links:
-            typer.echo(
+            _safe_echo(
                 f"{value.link_id}\t{value.identity.identity_id}\t"
                 f"{value.identity.title} — {', '.join(value.identity.artists)}\t"
                 f"canonical={value.canonical.canonical_track_id}"
