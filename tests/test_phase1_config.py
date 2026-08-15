@@ -40,14 +40,14 @@ class ConfigurationTests(unittest.TestCase):
     def test_runtime_root_is_not_an_application_config_field(self) -> None:
         with self.assertRaises(ValidationError):
             ApplicationConfig.model_validate({
-                "schema_version": "1", "taxonomy_path": "taxonomy.yaml",
+                "schema_version": "2", "taxonomy_path": "taxonomy.yaml",
                 "runtime_root": "elsewhere",
             })
 
     def test_credential_like_unknown_field_fails_strict_schema(self) -> None:
         with self.assertRaises(ValidationError):
             ApplicationConfig.model_validate({
-                "schema_version": "1", "taxonomy_path": "taxonomy.yaml",
+                "schema_version": "2", "taxonomy_path": "taxonomy.yaml",
                 "client_secret": "synthetic-not-a-secret",
             })
 
@@ -88,7 +88,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "application.yaml"
             path.write_text(yaml.safe_dump({
-                "schema_version": "1", "taxonomy_path": "taxonomy.yaml", "surprise": True,
+                "schema_version": "2", "taxonomy_path": "taxonomy.yaml", "surprise": True,
             }), encoding="utf-8")
             with self.assertRaises(ValidationError):
                 load_application_config(path)

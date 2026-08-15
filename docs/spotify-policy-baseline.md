@@ -1,7 +1,8 @@
 # Spotify policy and Web API baseline
 
-Verified against official Spotify for Developers pages on **2026-08-14**. This is an engineering risk
-record, not legal advice. Reverify before Phase 2 and before every material production change.
+Verified against official Spotify for Developers pages on **2026-08-14** for the Phase 2 offline
+implementation. This is an engineering risk record, not legal advice. Reverify before the first controlled
+live checkpoint and every material production change.
 
 ## Recorded policy risk and user decision
 
@@ -56,26 +57,43 @@ exhaustion. Natural pauses while local research/review occurs require no Spotify
   identified separately and should stop work rather than trigger aggressive retries.
 - Playlist snapshot IDs are version identifiers. Later ingestion may skip known-unchanged sources and later
   reconciliation may use snapshots, but a snapshot never authorizes a write.
+- [Get Current User's Profile](https://developer.spotify.com/documentation/web-api/reference/get-current-users-profile)
+  currently associates `GET /me` with `user-read-private`. Phase 2 retains only immutable `account_id` and
+  the current Spotify user ID; it does not request or retain email or other profile fields.
+- Current playlist schemas permit `public: null`, and playlist `items`/count metadata can be absent for
+  followed playlists whose contents are unavailable. The adapter preserves these states as `None` rather
+  than inventing false/zero values.
 
-## Authentication baseline for a later phase
+## Phase 2 authentication baseline
 
-No authentication exists in Phase 0. For a local desktop/CLI client that cannot safely retain a client
-secret, Spotify's [Authorization overview](https://developer.spotify.com/documentation/web-api/concepts/authorization)
-and [PKCE guide](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow) support
-Authorization Code with PKCE, refresh tokens, exact redirect-URI allowlisting, and a random `state` value.
-A loopback callback is the likely V1 approach, subject to reverification in Phase 2.
+Spotify's [PKCE guide](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow) and
+[redirect URI rules](https://developer.spotify.com/documentation/web-api/concepts/redirect_uri) support a
+desktop client without a client secret, an S256 challenge, random state, and an IPv4 loopback callback.
+Register `http://127.0.0.1/callback`; Phase 2 chooses its port transiently after binding to loopback.
 
-Anticipated least-privilege scopes are `user-library-read`, `playlist-read-private`, and
-`playlist-read-collaborative` for configured inputs, plus only the modify scope(s) needed for the chosen
-managed-playlist visibility when writes are later approved. The current
-[scope reference](https://developer.spotify.com/documentation/web-api/concepts/scopes) associates private
-and public playlist mutations with `playlist-modify-private` and `playlist-modify-public`. Do not request
-email, listening history, playback, recommendations, image, library-write, or unrelated profile scopes.
+The exact Phase 2 scopes are `user-read-private`, `playlist-read-private`,
+`playlist-read-collaborative`, and `user-library-read`. No email or modify scope is requested. Access tokens
+remain in memory. Refresh tokens use the concrete built-in/core Windows Credential Locker backend supplied
+by the approved `keyring` package, never configured third-party or file backends.
 
-Access and refresh tokens must use OS-appropriate protected credential storage, never `.env`, repository
-files, logs, prompts, or SQLite. Logout/reset must delete local credentials and support user revocation.
+The Client ID may remain in CLI/environment process configuration for login and refresh but is not written
+to YAML, SQLite, or logs. State, verifier, challenge, redirect URI, authorization URL, and code exist only
+during login. `--no-browser` may deliberately print the complete authorization URL to the local terminal;
+the verifier is never displayed. Logout deletes the local credential; Spotify account settings provide
+server-side revocation.
+
+Spotify documents finite refresh-token lifetime and `invalid_grant` for expired/revoked authorization.
+Phase 2 fails closed, deletes an unusable stored token, and requires explicit reauthorization.
+
+## Playlist schema compatibility record
+
+The current `/playlists/{id}/items` reference and 2026 migration material identify nested `item` as the
+canonical field, while parts of the official reference remain inconsistent. Phase 2 never calls the removed
+`/playlists/{id}/tracks` endpoint. It includes one isolated nested-`track` parser used only when `item` is
+absent, prefers `item` whenever present, and records metadata-free variant counts in memory. Reassess and
+potentially remove this fallback after Phase 3's first controlled playlist read.
 
 ## Reverification gates
 
-Recheck all cited pages before Phase 2, Phase 7, and any release. Stop if Development Mode eligibility,
+Recheck all cited pages before the first live checkpoint, Phase 3, each write phase, and any release. Stop if Development Mode eligibility,
 playlist accessibility, OAuth behavior, endpoint paths, scopes, policy wording, or write semantics differ.

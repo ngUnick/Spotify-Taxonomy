@@ -1,12 +1,12 @@
 # Spotify Playlist Taxonomy
 
-This repository contains the Phase 0 architecture plus the Phase 1 local-state foundation for a
-personal, reviewable music-classification and playlist-synchronization project.
+This repository contains the Phase 0 architecture, Phase 1 local-state foundation, and Phase 2 offline
+Spotify PKCE/read-only adapter for a personal, reviewable music-classification and synchronization project.
 
-Phase 1 provides strict configuration and taxonomy validation, lazy per-user runtime paths, SQLite
-migrations and foundational persistence, a local Typer CLI, and integrity-checked backup/restore.
-It does **not** authenticate with Spotify, contact network services, ingest real music, run research or
-classification, create synchronization plans, or modify playlists.
+Phase 2 adds least-privilege PKCE, protected Windows refresh-token storage, bounded read retries, and a
+platform-neutral Spotify reader. The offline checkpoint has no real authorization or account access.
+It does **not** ingest real music, run research/classification, create synchronization plans, or modify
+Spotify. No writer is implemented.
 
 ## Setup and validation
 
@@ -20,6 +20,9 @@ uv run python -m compileall -q src tests
 ```
 
 All ordinary tests are offline and use invented data in temporary runtime directories.
+
+Spotify dashboard and PKCE setup are documented in `docs/spotify-setup.md`. Do not perform a real login or
+`spotify check` without explicit checkpoint approval.
 
 ## Runtime paths
 
@@ -46,6 +49,10 @@ spotify-taxonomy db status
 spotify-taxonomy backup create
 spotify-taxonomy backup verify BACKUP
 spotify-taxonomy backup restore BACKUP
+spotify-taxonomy spotify auth status
+spotify-taxonomy spotify auth login
+spotify-taxonomy spotify auth logout
+spotify-taxonomy spotify check
 ```
 
 `db init` validates the source-controlled taxonomy, migrates SQLite, and transactionally synchronizes
@@ -60,3 +67,4 @@ unversioned taxonomy changes fail rather than silently rewriting state.
 - `docs/safety-model.md` — playlist roles and guarded mutation design.
 - `docs/classification-design.md` — evidence, characteristics, proposals, and review.
 - `docs/spotify-policy-baseline.md` — dated Spotify API/policy risk record.
+- `docs/spotify-setup.md` — least-privilege dashboard, PKCE, credential, and revocation guidance.

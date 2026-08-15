@@ -5,6 +5,7 @@ from .models import (
     PlaylistDimension,
     PlaylistSpecificationDocument,
     SpecificationStatus,
+    SpotifyRuntimeConfig,
     TaxonomyDocument,
     TaxonomyPlaylistEntry,
     load_application_config,
@@ -16,7 +17,7 @@ from .models import (
 
 __all__ = [
     "ApplicationConfig", "PlaylistDimension", "PlaylistSpecificationDocument",
-    "SpecificationStatus", "TaxonomyDocument", "TaxonomyPlaylistEntry",
+    "SpecificationStatus", "SpotifyRuntimeConfig", "TaxonomyDocument", "TaxonomyPlaylistEntry",
     "load_application_config", "load_specification_document",
     "load_taxonomy_document", "resolve_taxonomy_path", "taxonomy_digest",
 ]

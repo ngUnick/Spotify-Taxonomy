@@ -10,6 +10,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "Proprietary - personal project" }
 dependencies = [
+    "httpx>=0.28,<1",
+    "keyring>=25.7,<26",
     "pydantic>=2.11,<3",
     "pyyaml>=6.0.2,<7",
     "typer>=0.16,<1",

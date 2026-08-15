@@ -31,13 +31,22 @@ class SpecificationStatus(StrEnum):
     RETIRED = "retired"
 
 
+class SpotifyRuntimeConfig(StrictModel):
+    """Non-secret Spotify transport settings."""
+
+    request_timeout_seconds: float = Field(default=20, ge=1, le=120)
+    max_read_attempts: int = Field(default=3, ge=1, le=10)
+    callback_timeout_seconds: float = Field(default=300, ge=30, le=900)
+
+
 class ApplicationConfig(StrictModel):
-    schema_version: Literal["1"]
+    schema_version: Literal["2"]
     taxonomy_path: Path
     database_filename: str = "app.db"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     file_logging: bool = False
     backup_retention_count: int = Field(default=5, ge=1, le=100)
+    spotify: SpotifyRuntimeConfig = Field(default_factory=SpotifyRuntimeConfig)
 
     @field_validator("database_filename")
     @classmethod

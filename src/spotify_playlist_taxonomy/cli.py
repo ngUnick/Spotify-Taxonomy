@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Callable
 
+import httpx
 import typer
 from pydantic import ValidationError
 
 from spotify_playlist_taxonomy import __version__
+from spotify_playlist_taxonomy.adapters.spotify import (
+    SpotifyAdapterError,
+    SpotifyAuthManager,
+    SpotifyReadOnlyAdapter,
+    WindowsCredentialStore,
+    mask_identifier,
+    resolve_client_id,
+)
 from spotify_playlist_taxonomy.config import (
     ApplicationConfig,
     TaxonomyDocument,
@@ -40,10 +50,14 @@ config_app = typer.Typer(no_args_is_help=True, help="Validate source-controlled 
 runtime_app = typer.Typer(no_args_is_help=True, help="Inspect local runtime paths.")
 database_app = typer.Typer(no_args_is_help=True, help="Initialize and inspect SQLite state.")
 backup_app = typer.Typer(no_args_is_help=True, help="Create, verify, and restore SQLite backups.")
+spotify_app = typer.Typer(no_args_is_help=True, help="Spotify authorization and read-only checks.")
+spotify_auth_app = typer.Typer(no_args_is_help=True, help="Manage protected Spotify authorization.")
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(database_app, name="db")
 app.add_typer(backup_app, name="backup")
+app.add_typer(spotify_app, name="spotify")
+spotify_app.add_typer(spotify_auth_app, name="auth")
 
 
 def _load_documents(config_path: Path) -> tuple[ApplicationConfig, TaxonomyDocument, Path]:
@@ -71,11 +85,41 @@ def _configure_file_logging(config: ApplicationConfig, paths: RuntimePaths) -> N
         filename=paths.log_dir / "spotify-taxonomy.log",
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    # HTTP transport logs can contain resource URLs or authorization headers.
+    logging.getLogger("httpx").disabled = True
+    logging.getLogger("httpcore").disabled = True
 
 
 def _fail(error: Exception) -> None:
     typer.echo(f"Error: {error}", err=True)
     raise typer.Exit(code=1)
+
+
+def _spotify_http_client(config: ApplicationConfig) -> httpx.Client:
+    return httpx.Client(
+        timeout=config.spotify.request_timeout_seconds,
+        verify=True,
+        follow_redirects=False,
+        trust_env=False,
+    )
+
+
+def _spotify_auth_manager(
+    config: ApplicationConfig,
+    client_id: str,
+    http_client: httpx.Client,
+    *,
+    authorization_url_sink: Callable[[str], None] | None = None,
+) -> SpotifyAuthManager:
+    sink = authorization_url_sink or (lambda value: None)
+    return SpotifyAuthManager(
+        client_id=client_id,
+        credential_store=WindowsCredentialStore(),
+        http_client=http_client,
+        callback_timeout_seconds=config.spotify.callback_timeout_seconds,
+        authorization_url_sink=sink,
+        warning_sink=lambda message: typer.echo(f"Warning: {message}", err=True),
+    )
 
 
 @app.callback()
@@ -240,4 +284,94 @@ def backup_restore(
         restore_backup(paths, backup_path, retention_count=config.backup_retention_count)
         typer.echo(f"Restored: {paths.database_path}")
     except (OSError, ValueError, ValidationError, PersistenceError, BackupError) as error:
+        _fail(error)
+
+
+@spotify_auth_app.command("status")
+def spotify_auth_status(
+    client_id: str | None = typer.Option(None, "--client-id"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+) -> None:
+    """Inspect protected local authorization without contacting Spotify."""
+    try:
+        config, _, _ = _load_documents(config_path)
+        resolved = resolve_client_id(client_id)
+        with _spotify_http_client(config) as http_client:
+            manager = _spotify_auth_manager(config, resolved, http_client)
+            status = manager.status()
+        typer.echo(f"client_id: {mask_identifier(resolved)}")
+        typer.echo(f"authorized: {status.authorized}")
+        if status.authorized:
+            typer.echo(f"scopes: {' '.join(status.scopes)}")
+            typer.echo(f"authorized_at: {status.authorized_at.isoformat()}")
+    except (OSError, ValueError, ValidationError, SpotifyAdapterError) as error:
+        _fail(error)
+
+
+@spotify_auth_app.command("login")
+def spotify_auth_login(
+    client_id: str | None = typer.Option(None, "--client-id"),
+    no_browser: bool = typer.Option(False, "--no-browser"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+) -> None:
+    """Authorize with PKCE; the full URL is printed only with --no-browser."""
+    try:
+        config, _, _ = _load_documents(config_path)
+        resolved = resolve_client_id(client_id)
+        with _spotify_http_client(config) as http_client:
+            manager = _spotify_auth_manager(
+                config, resolved, http_client, authorization_url_sink=typer.echo
+            )
+            token = manager.login(no_browser=no_browser)
+        typer.echo(f"Authorized: client_id={mask_identifier(resolved)}")
+        typer.echo(f"scopes: {' '.join(token.scopes)}")
+    except (OSError, ValueError, ValidationError, SpotifyAdapterError) as error:
+        _fail(error)
+
+
+@spotify_auth_app.command("logout")
+def spotify_auth_logout(
+    client_id: str | None = typer.Option(None, "--client-id"),
+    yes: bool = typer.Option(False, "--yes", help="Confirm local credential deletion."),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+) -> None:
+    """Delete the protected local refresh credential; no Spotify call is made."""
+    try:
+        config, _, _ = _load_documents(config_path)
+        resolved = resolve_client_id(client_id)
+        if not yes and not typer.confirm(
+            f"Delete local Spotify authorization for {mask_identifier(resolved)}?"
+        ):
+            raise typer.Abort()
+        with _spotify_http_client(config) as http_client:
+            manager = _spotify_auth_manager(config, resolved, http_client)
+            removed = manager.logout()
+        typer.echo(f"Local credential removed: {removed}")
+        typer.echo("To revoke server-side access, remove the app in your Spotify account settings.")
+    except (OSError, ValueError, ValidationError, SpotifyAdapterError) as error:
+        _fail(error)
+
+
+@spotify_app.command("check")
+def spotify_check(
+    client_id: str | None = typer.Option(None, "--client-id"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+) -> None:
+    """Perform the separately approved minimal GET /me connectivity check."""
+    try:
+        config, _, _ = _load_documents(config_path)
+        resolved = resolve_client_id(client_id)
+        with _spotify_http_client(config) as http_client:
+            manager = _spotify_auth_manager(config, resolved, http_client)
+            reader = SpotifyReadOnlyAdapter(
+                token_provider=manager,
+                http_client=http_client,
+                max_read_attempts=config.spotify.max_read_attempts,
+            )
+            account = reader.read_current_account()
+            status = manager.status()
+        typer.echo(f"account_id: {mask_identifier(account.account_id)}")
+        typer.echo(f"spotify_user_id: {mask_identifier(account.spotify_user_id)}")
+        typer.echo(f"scopes: {' '.join(status.scopes)}")
+    except (OSError, ValueError, ValidationError, SpotifyAdapterError) as error:
         _fail(error)

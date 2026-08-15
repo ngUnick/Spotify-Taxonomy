@@ -1,0 +1,48 @@
+# Spotify Phase 2 setup and credential handling
+
+Phase 2 is implemented and tested offline. These instructions do not authorize a real login or API call;
+each live checkpoint still requires explicit approval.
+
+## Dashboard configuration
+
+1. Create/select the personal Development Mode application in Spotify for Developers.
+2. Register the redirect URI exactly as `http://127.0.0.1/callback`. Do not use `localhost`.
+3. Keep the Client ID in `SPOTIFY_CLIENT_ID` or pass `--client-id`. Do not create or configure a client secret.
+4. Do not put tokens, the Client ID, or authorization responses in repository configuration.
+
+The application binds `127.0.0.1` on an ephemeral port for each login. It requests exactly:
+
+```text
+user-read-private
+playlist-read-private
+playlist-read-collaborative
+user-library-read
+```
+
+## Commands
+
+```powershell
+spotify-taxonomy spotify auth status
+spotify-taxonomy spotify auth login
+spotify-taxonomy spotify auth login --no-browser
+spotify-taxonomy spotify auth logout
+spotify-taxonomy spotify check
+```
+
+`--no-browser` prints the complete, short-lived authorization URL directly to the local terminal so the user
+can open it. That URL is never logged or persisted. The PKCE verifier is never printed. Ordinary output masks
+Client ID and account identifiers.
+
+`spotify check` performs only token refresh when needed and `GET /me`; do not run it before the separately
+approved real-authentication checkpoint. Playlist and saved-track reads are library interfaces for Phase 3,
+not Phase 2 CLI ingestion commands.
+
+## Protected storage and revocation
+
+Only the refresh token, granted scopes, and authorization timestamp are stored. On Windows they use the
+concrete built-in/core Windows Credential Locker implementation supplied by the approved `keyring` version.
+The application fails closed instead of using null, fail, file, configured, or third-party backends. Access
+tokens and all PKCE flow values are memory-only.
+
+`spotify auth logout` deletes the local protected credential. To revoke Spotify-side authorization too,
+remove the application from the connected-apps area of the Spotify account settings.

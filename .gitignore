@@ -15,6 +15,8 @@ build/
 !.env.example
 *token*
 *credentials*
+!src/spotify_playlist_taxonomy/adapters/spotify/credentials.py
+!tests/test_phase2_credentials.py
 
 # User/runtime state (must never become repository fixtures)
 /runtime/

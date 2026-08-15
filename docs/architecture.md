@@ -1,7 +1,7 @@
 # Phase 0 architecture
 
-Status: Phase 1 foundation, 2026-08-14. Phase 0 boundaries remain authoritative; Phase 1 adds strict
-configuration, lazy local runtime paths, SQLite persistence, and foundational CLI/backup behavior.
+Status: Phase 2 offline implementation checkpoint, 2026-08-14. Phase 0 boundaries remain authoritative;
+Phase 1 provides local persistence and Phase 2 adds PKCE plus a read-only Spotify adapter without ingestion.
 
 ## Design principles
 
@@ -58,6 +58,12 @@ facts, interpretations, classifications, and decisions auditable.
 - **Planner** computes an idempotent dry-run diff without a mutation capability.
 - **Guarded executor** is the only component receiving the platform write port. It revalidates stable ID,
   role, ownership, operation kind, approval, and current state before any later write.
+
+The Phase 2 Spotify adapter implements only current-account identity, current-user playlist metadata,
+playlist items, and saved-track reads. It maps responses immediately to minimal platform-neutral values and
+does not persist them. Playlist `/items` with nested `item` is canonical. Because Spotify's current reference
+is inconsistent, an isolated nested-`track` fallback may parse responses from the same `/items` endpoint and
+records only in-memory variant counts. The deprecated playlist `/tracks` endpoint is never called.
 
 ## Dependency rules
 

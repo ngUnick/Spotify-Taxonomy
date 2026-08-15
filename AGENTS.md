@@ -5,13 +5,20 @@ These rules apply throughout this repository.
 ## Phase boundaries
 
 - Stop at the phase requested by the user. Never begin a later phase implicitly.
-- Phase 1 is local-only: no OAuth, network providers, live account access, real classification,
-  ingestion workflows, or Spotify mutations.
+- Phase 2 adds PKCE and a read-only Spotify adapter. Ordinary tests remain socket-blocked and synthetic.
+  A real login, `spotify check`, playlist read, ingestion, classification, or mutation requires a separately
+  approved checkpoint.
 
 ## Credentials and user data
 
 - Never expose, prompt with, log, persist in ordinary files, or commit credentials, access tokens,
   refresh tokens, client secrets, cookies, or raw authorization responses.
+- A Spotify Client ID may exist in CLI/environment process configuration but must stay masked in ordinary
+  output and out of YAML, SQLite, logs, errors, and reports. PKCE state/verifier/challenge, callback URI,
+  authorization URL, and code are transient login-flow values only. `--no-browser` may print the full
+  authorization URL to the local terminal; the verifier is never displayed.
+- Refresh tokens use only the verified core Windows Credential Locker backend supplied by the approved
+  `keyring` version. Never accept configured third-party/file/null/fail backends or plaintext fallback.
 - Never commit real runtime catalogues, account/API dumps, playlist exports, classification batches,
   research caches, database files, or logs containing user data.
 - Unit tests and documentation examples must use synthetic data. Real title/artist identity may enter
@@ -30,6 +37,9 @@ These rules apply throughout this repository.
   characteristics must never depend on existing playlist proposals.
 - Classification providers must not import or invoke Spotify mutation code. Spotify synchronization
   must not depend on Codex-specific implementation details.
+- Spotify reads use the current `/items` endpoint and canonical nested `item` field. A narrow isolated
+  nested-`track` compatibility parser is temporary until Phase 3's first controlled read; never call the
+  deprecated playlist `/tracks` endpoint. Preserve absent playlist metadata as `None`.
 - Codex outputs must be structured, compact, versioned, and reference evidence IDs. Ask for concise
   justification summaries, not extensive reasoning.
 - Preserve external research provenance and cache only normalized, useful, terms-compatible material.
