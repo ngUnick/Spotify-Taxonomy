@@ -18,6 +18,7 @@ explicit, local, protected, and never committed.
 | Canonical track | local ID, display title/artists, ambiguity state | while referenced; needed for portable classification |
 | Identity mapping | provider, provider track ID, minimal title/artists, match state/confidence/basis | while syncing/matching; preserve distinct versions |
 | Playlist registration | logical ID, stable platform ID, role, ownership validation state | while configured; authorizes/guards sync |
+| Source scan | account binding, source ID, status, global positions, minimal identity/issue references, snapshot or Saved Tracks guards, versioned digest | retain for resume/audit; only a completed publication is current |
 | Research evidence | normalized fact/tag/short description, source/kind, reference ID/URL, confidence, retrieval/freshness status | while useful and permitted; refresh/expire by provider policy |
 | Derived characteristic | value, origin, evidence IDs, confidence, version, concise summary | while referenced; supports reproducibility |
 | Batch/item state | input fingerprint, schema/taxonomy/spec versions, status, attempts, compact error category | until completion plus practical audit window |
@@ -66,3 +67,9 @@ refreshed without repeatedly querying every track.
 
 Errors and telemetry are local by default. No cloud analytics are planned for V1. Secret values are redacted
 before error persistence or display.
+
+Phase 3 stores only explicitly registered playlist metadata; ordinary `/me/playlists` discovery is ephemeral.
+It stores no raw API responses. Account binding retains only stable `account_id`, current Spotify user ID,
+and verification timestamps. Track title and ordered artists are retained only as the minimal platform
+identity needed for catalogue matching; unavailable/local/null/unsupported/malformed entries retain only a
+structured issue kind and position.

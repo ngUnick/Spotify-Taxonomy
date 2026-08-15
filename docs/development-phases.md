@@ -21,9 +21,11 @@ minimum read scopes, redaction, pagination, rate/quota handling, and fake-client
 
 ## Phase 3 — SOURCE/INBOX ingestion plus canonical catalogue/matching workflow
 
-Read configured owned/collaborative SOURCE playlists, Liked Songs, and a Shazam-style INBOX; persist platform
-mappings, snapshots/cursors and processing state; and implement conservative matching queues with user
-confirmation, rejection, and unlink. Sources/inboxes remain immutable.
+Offline implementation complete pending separately approved real checkpoints. Explicitly register accessible
+SOURCE playlists, Liked Songs, and one Shazam-style INBOX; persist account-scoped scan/publication state; and
+use conservative matching queues with user confirmation, rejection, and unlink. Sources/inboxes remain
+immutable. Playlist snapshots allow checked resume; Saved Tracks restarts after interruption and publishes
+only after best-effort beginning/end consistency guards.
 
 ## Phase 4 — finalize V1 taxonomy specifications and characteristic vocabulary
 

@@ -1,4 +1,4 @@
-# Phase 1 persistence and runtime foundation
+# Phase 1 persistence foundation and Phase 3 additions
 
 ## Runtime layout
 
@@ -32,8 +32,31 @@ explicit canonical/identity links; match assessments; platform playlist registra
 derived characteristics and evidence references; proposals and their references; user decisions; and
 explicit calibration selections.
 
-It deliberately has no source-scan, research-job, Codex-batch, processing-run, desired-state, sync-plan,
-or operation-journal tables. Effective assignments and mutation authorization remain derived runtime data.
+Phase 3 migration 4 adds only account bindings, explicit ingestion sources, registered-playlist observations,
+staged scans and occurrences, current source publications, identity-ingestion state, conservative match
+candidates, and link-event history. It does not add research jobs, Codex batches, desired state, sync plans,
+or operation journals.
+
+Composite keys and foreign keys enforce registration/binding, source/registration, scan/source,
+publication/scan/source, and account identity-state relationships. Lifecycle conditions that cannot be
+expressed by a foreign key (notably terminal enumeration and completed publication) are revalidated in one
+write transaction. A publication can never point at another source's scan.
+
+An account binding is keyed by Spotify `account_id`; changed current-user IDs update verification metadata.
+Sources, scans, and publications remain attached to their original binding and cannot be adopted by another
+account. Unbinding is denied while any source remains active.
+
+Canonical tracks and provider identities remain global, but `account_canonical_identity_links`,
+`account_track_identity_state`, match candidates, and link events hold account-specific adoption and user
+decisions. Candidate identity uses a non-null content-derived key, including the create-new alternative, so
+reconciliation is idempotent. Confirmation atomically confirms one candidate and supersedes incompatible
+reviewable peers; failures roll back the link, event, candidate decision, and any new canonical row.
+
+`source_scan_entries` uses `(scan_id, source_position)` as its primary occurrence identity. A scan becomes
+authoritative only when `source_publications` atomically points at its completed, consistency-checked result.
+The scan content digest stores an explicit `digest_version` and excludes page-relative boundaries.
+Only completed current publications from active sources are matching inputs. Staged state in pending,
+running, failed, stale, or abandoned scans remains historical and non-authoritative.
 
 ## Backup and restore
 

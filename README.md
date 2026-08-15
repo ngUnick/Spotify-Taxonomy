@@ -1,12 +1,11 @@
 # Spotify Playlist Taxonomy
 
-This repository contains the Phase 0 architecture, Phase 1 local-state foundation, and Phase 2 offline
-Spotify PKCE/read-only adapter for a personal, reviewable music-classification and synchronization project.
+This repository contains the Phase 0 architecture, Phase 1 local-state foundation, Phase 2 Spotify
+PKCE/read-only adapter, and the offline/synthetic Phase 3 ingestion and canonical-matching implementation.
 
-Phase 2 adds least-privilege PKCE, protected Windows refresh-token storage, bounded read retries, and a
-platform-neutral Spotify reader. The offline checkpoint has no real authorization or account access.
-It does **not** ingest real music, run research/classification, create synchronization plans, or modify
-Spotify. No writer is implemented.
+Phase 3 adds explicit SOURCE/INBOX registration, publication-safe playlist and Saved Tracks scans, and
+reviewable canonical linking. No Phase 3 real playlist or Liked Songs checkpoint has been run. The project
+does **not** run research/classification, create synchronization plans, or modify Spotify. No writer exists.
 
 ## Setup and validation
 
@@ -53,7 +52,29 @@ spotify-taxonomy spotify auth status
 spotify-taxonomy spotify auth login
 spotify-taxonomy spotify auth logout
 spotify-taxonomy spotify check
+spotify-taxonomy spotify account status
+spotify-taxonomy spotify account bind
+spotify-taxonomy spotify account unbind
+spotify-taxonomy spotify source discover
+spotify-taxonomy spotify source register-playlist PLAYLIST_ID --role source
+spotify-taxonomy spotify source register-liked
+spotify-taxonomy spotify source list
+spotify-taxonomy spotify ingest scan SOURCE_ID
+spotify-taxonomy spotify ingest status
+spotify-taxonomy catalogue status
+spotify-taxonomy catalogue identity show IDENTITY_ID
+spotify-taxonomy catalogue match list
+spotify-taxonomy catalogue match show CANDIDATE_ID
+spotify-taxonomy catalogue match confirm-existing CANDIDATE_ID CANONICAL_ID
+spotify-taxonomy catalogue match confirm-new CANDIDATE_ID
+spotify-taxonomy catalogue match reject CANDIDATE_ID
+spotify-taxonomy catalogue link list
+spotify-taxonomy catalogue link unlink IDENTITY_ID
 ```
+
+Catalogue review commands are local and scoped to the active account binding. They deliberately show only
+the concise title, ordered artists, version cue, candidate basis, and link state needed for an interactive
+decision; routine logs and automated reports do not receive that metadata.
 
 `db init` validates the source-controlled taxonomy, migrates SQLite, and transactionally synchronizes
 the taxonomy version, digest, and logical-playlist metadata. An unchanged rerun is idempotent. Unsafe or

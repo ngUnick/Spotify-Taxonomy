@@ -141,10 +141,22 @@ class ReaderTests(unittest.TestCase):
 
     def test_saved_tracks_use_saved_track_object_without_schema_diagnostics(self) -> None:
         payload = {"items": [{"track": track("SavedOne")}], "next": None}
-        reader, _ = self.make_reader(lambda request: httpx.Response(200, json=payload))
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json=payload)
+
+        reader, _ = self.make_reader(handler)
         page = reader.read_saved_tracks()
         self.assertEqual("SavedOne", page.items[0].provider_track_id)
         self.assertIsNone(page.schema_diagnostics)
+        self.assertEqual(
+            "items(track(id,name,type,is_local,artists(name))),next,offset,limit,total",
+            requests[0].url.params["fields"],
+        )
+        for excluded in ("album", "images", "popularity", "preview_url"):
+            self.assertNotIn(excluded, requests[0].url.params["fields"])
 
     def test_cursor_is_local_and_arbitrary_next_url_is_never_followed(self) -> None:
         requests: list[httpx.Request] = []

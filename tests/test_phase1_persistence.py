@@ -36,8 +36,8 @@ class PersistenceTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_migrations_and_taxonomy_sync_are_idempotent(self) -> None:
-        self.assertEqual(3, current_schema_version(self.connection))
-        self.assertEqual(3, apply_migrations(self.connection))
+        self.assertEqual(4, current_schema_version(self.connection))
+        self.assertEqual(4, apply_migrations(self.connection))
         self.assertFalse(sync_taxonomy(self.connection, self.taxonomy))
         state = taxonomy_state(self.connection, self.taxonomy)
         self.assertTrue(state.in_sync)

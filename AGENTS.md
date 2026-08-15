@@ -5,8 +5,8 @@ These rules apply throughout this repository.
 ## Phase boundaries
 
 - Stop at the phase requested by the user. Never begin a later phase implicitly.
-- Phase 2 adds PKCE and a read-only Spotify adapter. Ordinary tests remain socket-blocked and synthetic.
-  A real login, `spotify check`, playlist read, ingestion, classification, or mutation requires a separately
+- Phase 3 adds offline SOURCE/INBOX ingestion and canonical matching. Ordinary tests remain socket-blocked
+  and synthetic. A real playlist or Saved Tracks read, classification, or mutation requires a separately
   approved checkpoint.
 
 ## Credentials and user data
@@ -34,6 +34,16 @@ These rules apply throughout this repository.
 - Keep canonical track identity and classification state independent of Spotify mappings.
 - Never merge canonical tracks solely because normalized title and artist strings match. Preserve
   version ambiguity and require stronger evidence or user confirmation.
+- Generate matching candidates or automatic bootstrap only for identities reachable through a currently
+  published source occurrence. Pending, failed, stale, or abandoned scans are never matching inputs.
+- Treat a completed publication as immutable. An unchanged playlist snapshot may skip enumeration but must
+  still retry unresolved account-scoped matching work.
+- Treat Spotify `account_id` as the account-binding key. Account unbind requires all sources disabled, and
+  state from one account binding must never be adopted by another account.
+- Keep provider identities and canonical tracks portable, while account adoption links, matching
+  intervention, candidates, and user decision history remain scoped to the account binding.
+- Resume playlist scans only after re-reading metadata and confirming the starting snapshot. Saved Tracks
+  scans never resume from a persisted offset; restart at zero and publish only after consistency guards.
 - Keep platform/identity provenance, external research provenance, characteristic derivation origin,
   proposal origin, and user-decision origin as separate concepts.
 - The dependency direction is evidence -> derived characteristics -> playlist proposals. Derived

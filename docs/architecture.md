@@ -1,7 +1,7 @@
 # Phase 0 architecture
 
-Status: Phase 2 offline implementation checkpoint, 2026-08-14. Phase 0 boundaries remain authoritative;
-Phase 1 provides local persistence and Phase 2 adds PKCE plus a read-only Spotify adapter without ingestion.
+Status: Phase 3 offline/synthetic implementation checkpoint, 2026-08-16. Phase 0 boundaries remain
+authoritative; no real playlist or Saved Tracks read has been performed for Phase 3.
 
 ## Design principles
 
@@ -64,6 +64,41 @@ playlist items, and saved-track reads. It maps responses immediately to minimal 
 does not persist them. Playlist `/items` with nested `item` is canonical. Because Spotify's current reference
 is inconsistent, an isolated nested-`track` fallback may parse responses from the same `/items` endpoint and
 records only in-memory variant counts. The deprecated playlist `/tracks` endpoint is never called.
+
+## Phase 3 ingestion and matching flow
+
+```text
+authenticated account_id binding
+  -> explicit SOURCE/INBOX registration
+  -> staged paginated scan occurrences
+  -> consistency/snapshot validation
+  -> atomic current-source publication
+  -> publication-eligible, account-scoped identity matching
+  -> active link reuse, conservative candidates, or untouched-identity bootstrap
+  -> explicit confirm/reject/unlink history
+```
+
+`account_id` is the stable account boundary; the current Spotify user ID is refreshable verification
+metadata. Playlist discovery is ephemeral until a stable playlist ID is explicitly registered. Ownership
+and the playlist's collaborative flag are separate facts, and actual item access determines ingestibility.
+
+Playlist resume re-reads metadata and requires the original `snapshot_id`; a mismatch abandons that cursor
+and starts a fresh scan. Saved Tracks has no snapshot and is never offset-resumed across interruptions. Its
+complete pass uses total and deterministic initial-page signature guards and therefore has best-effort,
+not playlist-snapshot, consistency.
+
+Page ingestion may stage minimal identities, but candidate generation and automatic bootstrap can see only
+identities reachable through a currently published source occurrence. Source ordering uses global
+`source_position = page_offset + item_index`; versioned content digests do not depend on API page size.
+
+Published scans are immutable. Staging and lifecycle transitions revalidate the active account/source and
+unpublished-running state transactionally; publication additionally requires terminal enumeration and a
+matching playlist snapshot. Unchanged-snapshot optimization skips enumeration only: reconciliation is run
+again so an earlier post-publication matching failure remains recoverable.
+
+Provider identities and canonical tracks are portable global records. Active links, intervention state,
+candidates, confirmations, rejections, unlinks, and decision history are account-scoped. Another account
+may see an existing canonical relationship as candidate evidence but must explicitly confirm adoption.
 
 ## Dependency rules
 

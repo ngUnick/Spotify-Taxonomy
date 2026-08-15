@@ -1,4 +1,4 @@
-# Spotify Phase 2 setup and credential handling
+# Spotify setup, credentials, and Phase 3 read checkpoints
 
 Phase 2 is implemented and tested offline. These instructions do not authorize a real login or API call;
 each live checkpoint still requires explicit approval.
@@ -54,3 +54,14 @@ tokens and all PKCE flow values are memory-only.
 
 `spotify auth logout` deletes the local protected credential. To revoke Spotify-side authorization too,
 remove the application from the connected-apps area of the Spotify account settings.
+
+## Phase 3 command boundary
+
+Phase 3 introduces account binding, ephemeral playlist discovery, explicit source registration, and
+read-only scans. These commands may contact `/me`, `/me/playlists`, `/playlists/{id}`,
+`/playlists/{id}/items`, or `/me/tracks` and must not be run until their real-read checkpoint is separately
+approved. They never call a Spotify mutation endpoint.
+
+The first controlled playlist read must record whether canonical nested `item` or the isolated legacy
+`track` fallback was observed, using metadata-free in-memory diagnostics only. Reassess removal of the
+fallback after that checkpoint; do not call deprecated `/playlists/{id}/tracks`.

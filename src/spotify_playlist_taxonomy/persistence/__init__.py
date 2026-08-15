@@ -14,6 +14,7 @@ from .database import (
     taxonomy_state,
 )
 from .store import RecordConflictError, RecordNotFoundError, SQLiteStateStore
+from .phase3 import AccountMismatchError, Phase3StateError, Phase3Store
 
 __all__ = [
     "BackupError", "BackupManifest", "MigrationError", "PersistenceError",
@@ -22,4 +23,5 @@ __all__ = [
     "SQLiteStateStore", "TaxonomyState", "TaxonomySyncError", "apply_migrations",
     "assert_integrity", "connect_database", "current_schema_version",
     "sync_taxonomy", "taxonomy_state",
+    "AccountMismatchError", "Phase3StateError", "Phase3Store",
 ]

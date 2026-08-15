@@ -20,6 +20,7 @@ from spotify_playlist_taxonomy.ports.music_platform import (
     PlatformPlaylistSummary,
     PlatformReadIssue,
     PlatformReadIssueKind,
+    PlatformTrackReadEntry,
     PlaylistEntrySchemaDiagnostics,
     PlaylistSummaryPage,
     TrackIdentityPage,
@@ -110,11 +111,14 @@ class SpotifyReadOnlyAdapter:
         raw_items = _required_list(payload, "items")
         identities: list[PlatformTrackIdentity] = []
         issues: list[PlatformReadIssue] = []
+        ordered: list[PlatformTrackReadEntry] = []
         canonical_count = 0
         legacy_count = 0
         for index, entry in enumerate(raw_items):
             if not isinstance(entry, dict):
-                issues.append(PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
+                issue = PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED)
+                issues.append(issue)
+                ordered.append(PlatformTrackReadEntry(index, issue=issue))
                 continue
             if "item" in entry:
                 canonical_count += 1
@@ -128,36 +132,54 @@ class SpotifyReadOnlyAdapter:
                 )
             if parsed.identity is not None:
                 identities.append(parsed.identity)
+                ordered.append(PlatformTrackReadEntry(index, identity=parsed.identity))
             if parsed.issue is not None:
                 issues.append(parsed.issue)
+                ordered.append(PlatformTrackReadEntry(index, issue=parsed.issue))
+        limit, total = _page_numbers(payload, len(raw_items))
         return TrackIdentityPage(
             items=tuple(identities),
             next_cursor=_next_cursor(payload, offset, len(raw_items)),
             snapshot_id=None,
             issues=tuple(issues),
             schema_diagnostics=PlaylistEntrySchemaDiagnostics(canonical_count, legacy_count),
+            entries=tuple(ordered), offset=offset, limit=limit, total=total,
         )
 
     def read_saved_tracks(self, cursor: str | None = None) -> TrackIdentityPage:
         offset = _decode_cursor(cursor)
-        payload = self._get("/me/tracks", {"limit": PAGE_SIZE, "offset": offset})
+        payload = self._get(
+            "/me/tracks",
+            {
+                "limit": PAGE_SIZE,
+                "offset": offset,
+                "fields": "items(track(id,name,type,is_local,artists(name))),next,offset,limit,total",
+            },
+        )
         raw_items = _required_list(payload, "items")
         identities: list[PlatformTrackIdentity] = []
         issues: list[PlatformReadIssue] = []
+        ordered: list[PlatformTrackReadEntry] = []
         for index, entry in enumerate(raw_items):
             if not isinstance(entry, dict) or "track" not in entry:
-                issues.append(PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
+                issue = PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED)
+                issues.append(issue)
+                ordered.append(PlatformTrackReadEntry(index, issue=issue))
                 continue
             parsed = _parse_track(entry["track"], index, wrapper_local=None)
             if parsed.identity is not None:
                 identities.append(parsed.identity)
+                ordered.append(PlatformTrackReadEntry(index, identity=parsed.identity))
             if parsed.issue is not None:
                 issues.append(parsed.issue)
+                ordered.append(PlatformTrackReadEntry(index, issue=parsed.issue))
+        limit, total = _page_numbers(payload, len(raw_items))
         return TrackIdentityPage(
             items=tuple(identities),
             next_cursor=_next_cursor(payload, offset, len(raw_items)),
             snapshot_id=None,
             issues=tuple(issues),
+            entries=tuple(ordered), offset=offset, limit=limit, total=total,
         )
 
     def _get(self, path: str, params: dict[str, object] | None = None) -> dict[str, object]:
@@ -334,6 +356,24 @@ def _next_cursor(payload: dict[str, object], offset: int, item_count: int) -> st
     if item_count == 0:
         raise _invalid_response()
     return _encode_cursor(offset + item_count)
+
+
+def _page_numbers(payload: dict[str, object], item_count: int) -> tuple[int | None, int | None]:
+    limit = payload.get("limit")
+    total = payload.get("total")
+    if limit is None:
+        limit_value = item_count
+    elif isinstance(limit, int) and not isinstance(limit, bool) and limit >= 0:
+        limit_value = limit
+    else:
+        raise _invalid_response()
+    if total is None:
+        total_value = None
+    elif isinstance(total, int) and not isinstance(total, bool) and total >= 0:
+        total_value = total
+    else:
+        raise _invalid_response()
+    return limit_value, total_value
 
 
 def _encode_cursor(offset: int) -> str:

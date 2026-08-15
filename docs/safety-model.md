@@ -8,6 +8,11 @@
 - **MANAGED**: a playlist created or deliberately registered for this system. This role is necessary but not
   sufficient for a write.
 
+Phase 3 registration grants read/ingestion intent only. `collaborative=true` does not prove that the current
+user is a collaborator and never implies ownership or write authority. Non-owned registered playlists may be
+ingested only when the read adapter can actually access their items. Account unbind is denied until every
+registered ingestion source has been deliberately disabled.
+
 Unknown/unregistered targets are read-only. Display names and taxonomy labels never confer authority. A
 playlist named “Rock” is not writable unless its stable Spotify ID is explicitly registered as managed.
 
