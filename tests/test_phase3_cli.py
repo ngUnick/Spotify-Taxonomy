@@ -2,11 +2,23 @@ from io import BytesIO, TextIOWrapper
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import _bootstrap  # noqa: F401
 from typer.testing import CliRunner
 
 from spotify_playlist_taxonomy.cli import _render_cli_text, _safe_echo, app
+from spotify_playlist_taxonomy.domain.ingestion import (
+    CandidateReview,
+    MatchCandidate,
+    MatchCandidateAction,
+    MatchCandidateState,
+)
+from spotify_playlist_taxonomy.domain.models import (
+    CanonicalTrack,
+    IdentityProvider,
+    PlatformTrackIdentity,
+)
 from spotify_playlist_taxonomy.persistence import apply_migrations, connect_database
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 
@@ -77,6 +89,88 @@ class Phase3CliTests(unittest.TestCase):
         self.assertIn("bound: true", result.output)
         self.assertNotIn("synthetic-account-identifier", result.output)
         self.assertNotIn("synthetic-user-identifier", result.output)
+
+    def test_match_show_renders_link_existing_canonical_display_fields(self) -> None:
+        identity = PlatformTrackIdentity(
+            identity_id="spotify.synthetic-review",
+            provider=IdentityProvider.SPOTIFY,
+            provider_track_id="synthetic-provider-track",
+            title="Synthetic Café 東京",
+            artists=("Synthetic Artist Ω", "Second Artist"),
+            version_label="acoustic",
+        )
+        candidate = MatchCandidate(
+            candidate_id="candidate.synthetic-link",
+            account_binding_id="binding-synthetic",
+            identity_id=identity.identity_id,
+            canonical_track_id="canonical.synthetic",
+            action=MatchCandidateAction.LINK_EXISTING,
+            state=MatchCandidateState.AMBIGUOUS,
+            confidence=0.5,
+            basis=("normalized_title_artist_match_only",),
+            matcher_version="synthetic.v1",
+        )
+        canonical = CanonicalTrack(
+            canonical_track_id="canonical.synthetic",
+            display_title="Canonical Café 東京",
+            display_artists=("Canonical Artist Ω", "Second Artist"),
+        )
+        with patch("spotify_playlist_taxonomy.cli._phase3_review") as review_factory:
+            review_factory.return_value.candidate.return_value = CandidateReview(
+                candidate, identity, canonical
+            )
+            result = RUNNER.invoke(
+                app,
+                self.args("catalogue", "match", "show", candidate.candidate_id),
+            )
+
+        self.assertEqual(0, result.exit_code, result.output)
+        self.assertIn("state: ambiguous", result.output)
+        self.assertIn("action: link_existing", result.output)
+        self.assertIn("identity: Synthetic Café 東京 — Synthetic Artist Ω, Second Artist", result.output)
+        self.assertIn("identity_version: acoustic", result.output)
+        self.assertIn("canonical: Canonical Café 東京 — Canonical Artist Ω, Second Artist", result.output)
+        self.assertIn("basis: normalized_title_artist_match_only", result.output)
+        self.assertNotIn("synthetic-provider-track", result.output)
+        self.assertNotIn("binding-synthetic", result.output)
+
+    def test_match_show_create_new_still_renders_without_canonical(self) -> None:
+        identity = PlatformTrackIdentity(
+            identity_id="spotify.synthetic-create",
+            provider=IdentityProvider.SPOTIFY,
+            provider_track_id="synthetic-create-track",
+            title="Synthetic New Recording",
+            artists=("Synthetic Artist",),
+        )
+        candidate = MatchCandidate(
+            candidate_id="candidate.synthetic-create",
+            account_binding_id="binding-synthetic",
+            identity_id=identity.identity_id,
+            canonical_track_id=None,
+            action=MatchCandidateAction.CREATE_NEW,
+            state=MatchCandidateState.USER_CONFIRMATION_REQUIRED,
+            confidence=0.0,
+            basis=("preserve_distinct_recording_option",),
+            matcher_version="synthetic.v1",
+        )
+        with patch("spotify_playlist_taxonomy.cli._phase3_review") as review_factory:
+            review_factory.return_value.candidate.return_value = CandidateReview(
+                candidate, identity, None
+            )
+            result = RUNNER.invoke(
+                app,
+                self.args("catalogue", "match", "show", candidate.candidate_id),
+            )
+
+        self.assertEqual(0, result.exit_code, result.output)
+        self.assertIn("state: user_confirmation_required", result.output)
+        self.assertIn("action: create_new", result.output)
+        self.assertIn("identity: Synthetic New Recording — Synthetic Artist", result.output)
+        self.assertIn("identity_version: -", result.output)
+        self.assertIn("canonical: -", result.output)
+        self.assertIn("basis: preserve_distinct_recording_option", result.output)
+        self.assertNotIn("synthetic-create-track", result.output)
+        self.assertNotIn("binding-synthetic", result.output)
 
     def test_unicode_metadata_renders_unchanged_on_utf8_output(self) -> None:
         original = "Synthetic 💯 — Ελληνικά — Café — 東京"

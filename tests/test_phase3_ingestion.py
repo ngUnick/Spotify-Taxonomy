@@ -641,6 +641,32 @@ class MatchingTests(Phase3TestCase):
             for item in self.store.candidates(self.binding_id())
         ))
 
+    def test_review_candidate_lookup_rejects_another_accounts_candidate(self) -> None:
+        identity_id = self.publish(identity("scoped-review"), "scan-scoped-review")
+        self.connection.execute(
+            "INSERT INTO canonical_tracks VALUES (?, ?, ?)",
+            ("scoped-existing", "Invented Song", "2026-01-01T00:00:00+00:00"),
+        )
+        self.connection.execute(
+            "INSERT INTO canonical_track_artists VALUES (?, ?, ?)",
+            ("scoped-existing", 0, "Synthetic Artist"),
+        )
+        self.connection.commit()
+        self.assertEqual("review_required", self.reconcile(identity_id, "scoped"))
+        first_candidate = self.store.candidates(self.binding_id())[0]
+        first_binding = self.binding_id()
+        self.store.disable_source(self.source_id, first_binding)
+        self.store.unbind_account()
+
+        self.reader.account = PlatformAccountIdentity("account-2", "user-2")
+        self.coordinator.bind_account()
+        second_account_review = Phase3ReviewService(
+            store=self.store,
+            binding_id=self.binding_id(),
+        )
+        with self.assertRaisesRegex(Phase3StateError, "account-scoped"):
+            second_account_review.candidate(first_candidate.candidate_id)
+
     def test_matching_failure_retries_without_reenumerating_unchanged_playlist(self) -> None:
         values = (
             identity("recover-1", title="Synthetic Recovery One"),

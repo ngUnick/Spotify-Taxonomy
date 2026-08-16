@@ -765,7 +765,8 @@ def catalogue_match_show(
         _safe_echo(f"identity_version: {value.identity.version_label or '-'}")
         _safe_echo(
             "canonical: -" if value.canonical is None else
-            f"canonical: {value.canonical.display_title} — {', '.join(value.canonical.artists)}"
+            f"canonical: {value.canonical.display_title} — "
+            f"{', '.join(value.canonical.display_artists)}"
         )
         _safe_echo(f"basis: {', '.join(candidate.basis)}")
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
