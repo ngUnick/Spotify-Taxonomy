@@ -46,8 +46,9 @@ exhaustion. Natural pauses while local research/review occurs require no Spotify
   other playlists return `403`. Third-party reference playlists therefore need explicit user import (for
   example synthetic-schema CSV/JSON/text) or exclusion—never scraping/browser automation.
 - [Get a User's Saved Tracks](https://developer.spotify.com/documentation/web-api/reference/get-users-saved-tracks)
-  models Liked Songs as the user's saved-track library, not a playlist. A later read-only phase will use
-  `user-library-read` and retain its own processed state; it will not remove saved tracks.
+  models Liked Songs as the user's saved-track library, not a playlist. Phase 3 uses `user-library-read`
+  for its singleton read-only Saved Tracks INBOX and retains its own processing state; it does not remove
+  saved tracks.
 - [Create Playlist](https://developer.spotify.com/documentation/web-api/reference/create-playlist) uses
   `POST /me/playlists`. [Add Items](https://developer.spotify.com/documentation/web-api/reference/add-items-to-playlist)
   uses `POST /playlists/{playlist_id}/items`, accepts at most 100 URIs per request, and returns a snapshot ID.
@@ -105,5 +106,6 @@ variant, so the compatibility fallback was removed. Canonical `item` is authorit
 
 ## Reverification gates
 
-Recheck all cited pages before the first live checkpoint, Phase 3, each write phase, and any release. Stop if Development Mode eligibility,
-playlist accessibility, OAuth behavior, endpoint paths, scopes, policy wording, or write semantics differ.
+Recheck all cited pages before any new live checkpoint, each write phase, and any release. Stop if
+Development Mode eligibility, playlist accessibility, OAuth behavior, endpoint paths, scopes, policy
+wording, or write semantics differ.

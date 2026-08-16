@@ -1,7 +1,7 @@
-# Spotify setup, credentials, and Phase 3 read checkpoints
+# Spotify setup, credentials, and read checkpoints
 
-Phase 2 is implemented and tested offline. These instructions do not authorize a real login or API call;
-each live checkpoint still requires explicit approval.
+Phases 2 and 3 are complete. These instructions do not authorize a new login or API call; every future live
+checkpoint still requires explicit approval.
 
 ## Dashboard configuration
 
@@ -57,10 +57,15 @@ remove the application from the connected-apps area of the Spotify account setti
 
 ## Phase 3 command boundary
 
-Phase 3 introduces account binding, ephemeral playlist discovery, explicit source registration, and
-read-only scans. These commands may contact `/me`, `/me/playlists`, `/playlists/{id}`,
-`/playlists/{id}/items`, or `/me/tracks` and must not be run until their real-read checkpoint is separately
-approved. They never call a Spotify mutation endpoint.
+Phase 3 introduced stable `account_id` binding, ephemeral playlist discovery, explicit SOURCE/INBOX
+registration, publication-safe read-only scans, and local account-scoped catalogue review. The completed
+live checkpoints covered one playlist SOURCE, the singleton Saved Tracks/Liked Songs INBOX, and one
+explicitly selected playlist-backed Shazam INBOX. A playlist name never conferred registration or INBOX
+authority; explicit selection was resolved to a stable ID before registration.
+
+These commands may contact `/me`, `/me/playlists`, `/playlists/{id}`, `/playlists/{id}/items`, or
+`/me/tracks` and must not be run again without a separately approved read boundary. They never call a
+Spotify mutation endpoint. The application requests no modify scope and has no Spotify writer.
 
 Phase 3 Checkpoint B observed canonical nested `item` across the complete 48-entry controlled playlist and
 no legacy `track` variant. The compatibility fallback was removed; canonical `item` is authoritative, and

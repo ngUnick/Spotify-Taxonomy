@@ -1,8 +1,8 @@
 # Data retention and provenance policy
 
-Status: mandatory Phase 0 baseline. Runtime schema and exact time-to-live values are Phase 1 decisions.
-Data minimization is field-by-field: every persisted field needs an operational, audit, matching, review,
-or recovery purpose.
+Status: mandatory baseline through completed Phase 3. Data minimization is field-by-field: every persisted
+field needs an operational, audit, matching, review, or recovery purpose. Exact provider-specific
+time-to-live values remain a later decision when external research caching is introduced.
 
 ## Storage locations
 
@@ -35,9 +35,10 @@ recommendations/genre inference, popularity, arbitrary album metadata, copied we
 passages, hidden model reasoning, or arbitrary debug dumps. Logs avoid title/artist by default and use local
 IDs/counts; diagnostic disclosure must be deliberate and temporary.
 
-Real Spotify identities may be processed by Codex only in the deliberate runtime classification workflow.
-They must not become repository fixtures or documentation examples. Tests use invented people, tracks,
-platform IDs, evidence, and playlists.
+Real Spotify identities may be processed by Codex only in a deliberate, explicitly approved runtime
+ingestion, review, or classification workflow. They must not become repository fixtures, documentation
+examples, routine logs, exports, or checkpoint artifacts. Tests use invented people, tracks, platform IDs,
+evidence, and playlists.
 
 ## Provenance rules
 

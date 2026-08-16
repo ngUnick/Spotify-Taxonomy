@@ -1,7 +1,8 @@
 # Phase 0 architecture
 
-Status: Phase 3 offline/synthetic implementation checkpoint, 2026-08-16. Phase 0 boundaries remain
-authoritative; no real playlist or Saved Tracks read has been performed for Phase 3.
+Status: Phase 3 complete, 2026-08-16. Phase 0 boundaries remain authoritative. The read-only Phase 3
+workflow has been validated against one playlist SOURCE, the singleton Saved Tracks/Liked Songs INBOX,
+and one explicitly selected playlist-backed Shazam INBOX. Phase 4 has not started.
 
 ## Design principles
 
@@ -99,6 +100,13 @@ again so an earlier post-publication matching failure remains recoverable.
 Provider identities and canonical tracks are portable global records. Active links, intervention state,
 candidates, confirmations, rejections, unlinks, and decision history are account-scoped. Another account
 may see an existing canonical relationship as candidate evidence but must explicitly confirm adoption.
+
+The final Phase 3 publication baseline is three completed authoritative scans with one current publication
+per source: 48 SOURCE, 506 Saved Tracks INBOX, and 252 playlist-backed Shazam INBOX occurrences. These 806
+occurrences resolve to 744 published identities, 740 canonical tracks, and 744 active account-scoped links.
+Four ambiguous duplicate cases were explicitly confirmed as existing-canonical links; their competing
+create-new candidates were superseded, and no review-required identity remains. No real title, artist,
+playlist ID, account ID, or candidate ID belongs in source-controlled documentation.
 
 ## Dependency rules
 

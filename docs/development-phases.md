@@ -3,36 +3,39 @@
 Each phase ends with tests, exact status/diff, unresolved decisions, and explicit user approval. Work stops
 at every checkpoint. A phase number does not itself authorize service access or external mutations.
 
+Current roadmap status: **Phase 3 COMPLETE. Phase 4 NEXT / NOT STARTED.**
+
 ## Phase 0 — policy baseline, architecture, skeleton and invariants (complete)
 
 Established platform-neutral identity/classification boundaries, provenance, canonical matching invariants,
 write safety, data governance, provider ports, and synthetic offline safety tests.
 
-## Phase 1 — configuration, runtime layout, SQLite persistence, foundational CLI and backup/restore
+## Phase 1 — configuration, runtime layout, SQLite persistence, foundational CLI and backup/restore (complete)
 
 Adds strict versioned configuration/taxonomy schemas and a draft specification envelope; lazy per-user
 runtime paths; SQLite migrations and basic Phase 0 domain round trips; transactionally synchronized taxonomy
 state; foundational local CLI commands; and proportionate backup/restore. Synthetic data only.
 
-## Phase 2 — Spotify PKCE and read-only adapter
+## Phase 2 — Spotify PKCE and read-only adapter (complete)
 
 Reverify current policy/API behavior; implement Authorization Code with PKCE, protected credential storage,
 minimum read scopes, redaction, pagination, rate/quota handling, and fake-client tests. No writes.
 
-## Phase 3 — SOURCE/INBOX ingestion plus canonical catalogue/matching workflow
+## Phase 3 — SOURCE/INBOX ingestion plus canonical catalogue/matching workflow (complete)
 
-Offline implementation complete pending separately approved real checkpoints. Explicitly register accessible
-SOURCE playlists, Liked Songs, and one Shazam-style INBOX; persist account-scoped scan/publication state; and
-use conservative matching queues with user confirmation, rejection, and unlink. Sources/inboxes remain
-immutable. Playlist snapshots allow checked resume; Saved Tracks restarts after interruption and publishes
-only after best-effort beginning/end consistency guards.
+Implemented and live-validated explicit SOURCE registration, the singleton Saved Tracks/Liked Songs INBOX,
+and one explicitly selected playlist-backed Shazam INBOX. Stable `account_id` binding, ephemeral discovery,
+completed-publication gating, immutable SOURCE/INBOX behavior, account-scoped catalogue adoption, and local
+review were verified. The final baseline has 806 published occurrences, 744 published provider identities,
+740 portable canonical tracks, 744 active account-scoped links, four explicit existing-canonical decisions,
+and no remaining review-required identity. Spotify access remained read-only; no writer exists.
 
-## Phase 4 — finalize V1 taxonomy specifications and characteristic vocabulary
+## Phase 4 — finalize V1 taxonomy specifications and characteristic vocabulary (next; not started)
 
 Finalize proportional specifications for the 15 broad Genres and the subjective Vibe/Activity playlists,
 then review the characteristic vocabulary required for classification and research sufficiency.
 
-## Phase 5 — independent research providers, caching, provenance and sufficiency
+## Phase 5 — independent research providers, caching, provenance, sufficiency
 
 Add progressive independent providers and cache normalized provenance-aware evidence. Evaluate sufficiency
 against the Phase 4 specifications/vocabulary before targeted research.
@@ -42,17 +45,17 @@ against the Phase 4 specifications/vocabulary before targeted research.
 Implement versioned evidence-to-characteristic logic and deterministic broad-genre/activity rules. Generated
 outputs remain proposals; tuning values remain configurable until real calibration.
 
-## Phase 7 — review, overrides and calibration workflow
+## Phase 7 — review, overrides, calibration
 
 Implement proposal review, explicit include/exclude decisions, supersession, effective assignments, and
 deliberately selected calibration examples before Codex classification exists.
 
-## Phase 8 — Codex batch classification
+## Phase 8 — Codex supervised file-exchange classification
 
 Implement supervised, validated, resumable file export/import behind the classifier port without an embedded
 model API or frozen arbitrary batch defaults.
 
-## Phase 9 — desired state and dry-run synchronization planner
+## Phase 9 — desired state / dry-run synchronization
 
 Build effective desired state and addition-only diffs using a fake platform. State/digest/snapshot changes
 authoritatively invalidate approvals. Prove dry-run performs zero writes.
@@ -67,7 +70,7 @@ reconciliation selected during the phase; do not mandate a user-visible operatio
 Add approved missing items with configurable bounded batches, deduplication, 429/quota/partial-failure and
 ambiguous-result reconciliation, verification, and journaling. No destructive mutation.
 
-## Phase 12 — periodic inbox processing and V1 hardening
+## Phase 12 — periodic inbox processing / V1 hardening
 
 Provide the manually invoked end-to-end workflow with resumability, history, backup/recovery, and explicit
 review/approval boundaries. Leave Liked Songs and Shazam entries intact.

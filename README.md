@@ -1,11 +1,24 @@
 # Spotify Playlist Taxonomy
 
-This repository contains the Phase 0 architecture, Phase 1 local-state foundation, Phase 2 Spotify
-PKCE/read-only adapter, and the offline/synthetic Phase 3 ingestion and canonical-matching implementation.
+Phases 0 through 3 are complete. The repository contains the safety architecture, local SQLite foundation,
+Spotify PKCE/read-only adapter, and the live-validated SOURCE/INBOX ingestion and canonical-matching
+workflow. Phase 4 has not started.
 
-Phase 3 adds explicit SOURCE/INBOX registration, publication-safe playlist and Saved Tracks scans, and
-reviewable canonical linking. No Phase 3 real playlist or Liked Songs checkpoint has been run. The project
-does **not** run research/classification, create synchronization plans, or modify Spotify. No writer exists.
+The completed Phase 3 runtime has one playlist SOURCE publication (48 occurrences), the singleton Saved
+Tracks/Liked Songs INBOX publication (506 occurrences), and one explicitly selected playlist-backed Shazam
+INBOX publication (252 occurrences). Their completed, consistency-checked publications contain 806
+occurrences and 744 distinct provider identities. All 744 identities have active account-scoped canonical
+links to 740 portable canonical tracks; four ambiguous duplicate cases were explicitly confirmed as links
+to existing canonicals, and no review-required identity remains.
+
+The stable Spotify `account_id` is the local binding boundary; playlist discovery remains ephemeral until a
+stable ID is explicitly registered. Provider identities and canonical tracks are global/portable, while
+adoption links, candidates, interventions, and decision history are account-scoped. Playlist ingestion uses
+only `/playlists/{id}/items` and canonical nested `item`; the legacy nested-`track` fallback was removed after
+live validation. Spotify remained read-only throughout Phase 3. No modify scope or Spotify writer exists.
+
+The project does **not** yet run research/classification, finalize desired state, create synchronization
+plans, or modify Spotify.
 
 ## Setup and validation
 
@@ -89,3 +102,4 @@ unversioned taxonomy changes fail rather than silently rewriting state.
 - `docs/classification-design.md` — evidence, characteristics, proposals, and review.
 - `docs/spotify-policy-baseline.md` — dated Spotify API/policy risk record.
 - `docs/spotify-setup.md` — least-privilege dashboard, PKCE, credential, and revocation guidance.
+- `docs/project-handoff.md` — current completion baseline, limitations, and next authorized boundary.

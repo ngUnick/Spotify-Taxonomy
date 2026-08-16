@@ -5,9 +5,9 @@ These rules apply throughout this repository.
 ## Phase boundaries
 
 - Stop at the phase requested by the user. Never begin a later phase implicitly.
-- Phase 3 adds offline SOURCE/INBOX ingestion and canonical matching. Ordinary tests remain socket-blocked
-  and synthetic. A real playlist or Saved Tracks read, classification, or mutation requires a separately
-  approved checkpoint.
+- Phases 0 through 3 are complete. Phase 4 has not started and must not begin without explicit user
+  authorization. Ordinary tests remain socket-blocked and synthetic. Any further real Spotify read,
+  classification/research access, or mutation requires a separately approved checkpoint.
 
 ## Credentials and user data
 
@@ -25,7 +25,8 @@ These rules apply throughout this repository.
 - Never commit real runtime catalogues, account/API dumps, playlist exports, classification batches,
   research caches, database files, or logs containing user data.
 - Unit tests and documentation examples must use synthetic data. Real title/artist identity may enter
-  Codex only through a deliberate runtime classification workflow in an approved later phase.
+  Codex only through a deliberate, explicitly approved runtime ingestion, review, or classification
+  workflow; it must never enter repository files or routine logs.
 - Runtime state belongs outside the repository, under an appropriate per-user Windows application-data
   directory. Persist only fields justified by the data-retention policy.
 
