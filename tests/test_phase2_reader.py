@@ -78,7 +78,7 @@ class ReaderTests(unittest.TestCase):
         self.assertNotEqual(False, item.public)
         self.assertNotEqual(0, item.item_count)
 
-    def test_playlist_item_parser_prefers_canonical_and_isolates_legacy(self) -> None:
+    def test_playlist_item_parser_uses_canonical_item(self) -> None:
         payload = {
             "items": [
                 {"is_local": False, "item": track("CanonicalOne")},
@@ -86,13 +86,11 @@ class ReaderTests(unittest.TestCase):
                     "item": track("CanonicalWins"),
                     "track": track("LegacyIgnored"),
                 },
-                {"track": track("LegacyOnly")},
-                {"item": None, "track": track("MustNotFallback")},
             ],
             "next": None,
             "offset": 0,
             "limit": 50,
-            "total": 4,
+            "total": 2,
         }
         requests: list[httpx.Request] = []
 
@@ -103,16 +101,75 @@ class ReaderTests(unittest.TestCase):
         reader, _ = self.make_reader(handler)
         page = reader.read_playlist_items("SyntheticPlaylist")
         self.assertEqual(
-            ["CanonicalOne", "CanonicalWins", "LegacyOnly"],
+            ["CanonicalOne", "CanonicalWins"],
             [item.provider_track_id for item in page.items],
         )
-        self.assertEqual((PlatformReadIssueKind.NULL,), tuple(issue.kind for issue in page.issues))
-        self.assertEqual(3, page.schema_diagnostics.canonical_item_count)
-        self.assertEqual(1, page.schema_diagnostics.legacy_track_count)
+        self.assertFalse(page.issues)
+        self.assertEqual(2, page.schema_diagnostics.canonical_item_count)
         self.assertEqual("/v1/playlists/SyntheticPlaylist/items", requests[0].url.path)
         self.assertNotIn("/tracks", requests[0].url.path)
         self.assertIn("item(", requests[0].url.params["fields"])
-        self.assertIn("track(", requests[0].url.params["fields"])
+        self.assertNotIn("track(", requests[0].url.params["fields"])
+
+    def test_missing_canonical_item_is_not_rescued_by_legacy_track(self) -> None:
+        payload = {
+            "items": [{"track": track("LegacyMustBeIgnored")}],
+            "next": None,
+        }
+        reader, _ = self.make_reader(lambda request: httpx.Response(200, json=payload))
+        page = reader.read_playlist_items("SyntheticPlaylist")
+        self.assertFalse(page.items)
+        self.assertEqual(
+            [PlatformReadIssueKind.MALFORMED],
+            [issue.kind for issue in page.issues],
+        )
+        self.assertEqual(0, page.schema_diagnostics.canonical_item_count)
+
+    def test_null_canonical_item_is_not_rescued_by_legacy_track(self) -> None:
+        payload = {
+            "items": [{"item": None, "track": track("LegacyMustBeIgnored")}],
+            "next": None,
+        }
+        reader, _ = self.make_reader(lambda request: httpx.Response(200, json=payload))
+        page = reader.read_playlist_items("SyntheticPlaylist")
+        self.assertFalse(page.items)
+        self.assertEqual(
+            [PlatformReadIssueKind.NULL],
+            [issue.kind for issue in page.issues],
+        )
+
+    def test_malformed_canonical_item_is_not_rescued_by_legacy_track(self) -> None:
+        payload = {
+            "items": [
+                {"item": "malformed-canonical", "track": track("LegacyMustBeIgnored")}
+            ],
+            "next": None,
+        }
+        reader, _ = self.make_reader(lambda request: httpx.Response(200, json=payload))
+        page = reader.read_playlist_items("SyntheticPlaylist")
+        self.assertFalse(page.items)
+        self.assertEqual(
+            [PlatformReadIssueKind.MALFORMED],
+            [issue.kind for issue in page.issues],
+        )
+
+    def test_unsupported_canonical_item_is_not_rescued_by_legacy_track(self) -> None:
+        payload = {
+            "items": [
+                {
+                    "item": {"id": "SyntheticEpisode", "name": "Synthetic Episode", "type": "episode"},
+                    "track": track("LegacyMustBeIgnored"),
+                }
+            ],
+            "next": None,
+        }
+        reader, _ = self.make_reader(lambda request: httpx.Response(200, json=payload))
+        page = reader.read_playlist_items("SyntheticPlaylist")
+        self.assertFalse(page.items)
+        self.assertEqual(
+            [PlatformReadIssueKind.UNSUPPORTED],
+            [issue.kind for issue in page.issues],
+        )
 
     def test_local_unsupported_unavailable_and_malformed_items_are_issues(self) -> None:
         payload = {

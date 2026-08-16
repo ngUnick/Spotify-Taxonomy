@@ -98,10 +98,10 @@ Phase 2 fails closed, deletes an unusable stored token, and requires explicit re
 ## Playlist schema compatibility record
 
 The current `/playlists/{id}/items` reference and 2026 migration material identify nested `item` as the
-canonical field, while parts of the official reference remain inconsistent. Phase 2 never calls the removed
-`/playlists/{id}/tracks` endpoint. It includes one isolated nested-`track` parser used only when `item` is
-absent, prefers `item` whenever present, and records metadata-free variant counts in memory. Reassess and
-potentially remove this fallback after Phase 3's first controlled playlist read.
+canonical field, while parts of the official reference remain inconsistent. Phase 3 Checkpoint B observed
+canonical `item` across every entry in the complete 48-entry controlled playlist and no legacy `track`
+variant, so the compatibility fallback was removed. Canonical `item` is authoritative, and the deprecated
+`/playlists/{id}/tracks` endpoint is never called.
 
 ## Reverification gates
 

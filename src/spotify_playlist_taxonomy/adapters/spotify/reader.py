@@ -103,8 +103,8 @@ class SpotifyReadOnlyAdapter:
                 "limit": PAGE_SIZE,
                 "offset": offset,
                 "fields": (
-                    "items(is_local,item(id,name,type,is_local,artists(name)),"
-                    "track(id,name,type,is_local,artists(name))),next,offset,limit,total"
+                    "items(is_local,item(id,name,type,is_local,artists(name))),"
+                    "next,offset,limit,total"
                 ),
             },
         )
@@ -113,7 +113,6 @@ class SpotifyReadOnlyAdapter:
         issues: list[PlatformReadIssue] = []
         ordered: list[PlatformTrackReadEntry] = []
         canonical_count = 0
-        legacy_count = 0
         for index, entry in enumerate(raw_items):
             if not isinstance(entry, dict):
                 issue = PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED)
@@ -123,9 +122,6 @@ class SpotifyReadOnlyAdapter:
             if "item" in entry:
                 canonical_count += 1
                 parsed = _parse_track(entry["item"], index, wrapper_local=entry.get("is_local"))
-            elif "track" in entry:
-                legacy_count += 1
-                parsed = _parse_legacy_playlist_track(entry["track"], index, entry.get("is_local"))
             else:
                 parsed = _ParsedTrack(
                     None, PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED)
@@ -142,7 +138,7 @@ class SpotifyReadOnlyAdapter:
             next_cursor=_next_cursor(payload, offset, len(raw_items)),
             snapshot_id=None,
             issues=tuple(issues),
-            schema_diagnostics=PlaylistEntrySchemaDiagnostics(canonical_count, legacy_count),
+            schema_diagnostics=PlaylistEntrySchemaDiagnostics(canonical_count),
             entries=tuple(ordered), offset=offset, limit=limit, total=total,
         )
 
@@ -288,14 +284,6 @@ def _parse_playlist_summary(value: object) -> PlatformPlaylistSummary:
         item_count=item_count,
         snapshot_id=snapshot,
     )
-
-
-def _parse_legacy_playlist_track(
-    value: object, index: int, wrapper_local: object
-) -> _ParsedTrack:
-    """Isolated compatibility parser; remove after a controlled Phase 3 read."""
-
-    return _parse_track(value, index, wrapper_local=wrapper_local)
 
 
 def _parse_track(value: object, index: int, *, wrapper_local: object) -> _ParsedTrack:

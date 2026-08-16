@@ -61,9 +61,9 @@ facts, interpretations, classifications, and decisions auditable.
 
 The Phase 2 Spotify adapter implements only current-account identity, current-user playlist metadata,
 playlist items, and saved-track reads. It maps responses immediately to minimal platform-neutral values and
-does not persist them. Playlist `/items` with nested `item` is canonical. Because Spotify's current reference
-is inconsistent, an isolated nested-`track` fallback may parse responses from the same `/items` endpoint and
-records only in-memory variant counts. The deprecated playlist `/tracks` endpoint is never called.
+does not persist them. Playlist `/items` with nested `item` is authoritative. Phase 3 Checkpoint B observed
+that schema across every entry in the complete 48-entry controlled playlist, so the nested-`track`
+compatibility fallback was removed. The deprecated playlist `/tracks` endpoint is never called.
 
 ## Phase 3 ingestion and matching flow
 

@@ -50,9 +50,9 @@ These rules apply throughout this repository.
   characteristics must never depend on existing playlist proposals.
 - Classification providers must not import or invoke Spotify mutation code. Spotify synchronization
   must not depend on Codex-specific implementation details.
-- Spotify reads use the current `/items` endpoint and canonical nested `item` field. A narrow isolated
-  nested-`track` compatibility parser is temporary until Phase 3's first controlled read; never call the
-  deprecated playlist `/tracks` endpoint. Preserve absent playlist metadata as `None`.
+- Spotify reads use the current `/items` endpoint and canonical nested `item` field. Never inspect or fall
+  back to a sibling nested `track` field, and never call the deprecated playlist `/tracks` endpoint.
+  Preserve absent playlist metadata as `None`.
 - Codex outputs must be structured, compact, versioned, and reference evidence IDs. Ask for concise
   justification summaries, not extensive reasoning.
 - Preserve external research provenance and cache only normalized, useful, terms-compatible material.

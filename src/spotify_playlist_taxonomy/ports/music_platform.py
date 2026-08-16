@@ -71,7 +71,6 @@ class PlatformPlaylistSummary:
 @dataclass(frozen=True, slots=True)
 class PlaylistEntrySchemaDiagnostics:
     canonical_item_count: int = 0
-    legacy_track_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)

@@ -62,6 +62,6 @@ read-only scans. These commands may contact `/me`, `/me/playlists`, `/playlists/
 `/playlists/{id}/items`, or `/me/tracks` and must not be run until their real-read checkpoint is separately
 approved. They never call a Spotify mutation endpoint.
 
-The first controlled playlist read must record whether canonical nested `item` or the isolated legacy
-`track` fallback was observed, using metadata-free in-memory diagnostics only. Reassess removal of the
-fallback after that checkpoint; do not call deprecated `/playlists/{id}/tracks`.
+Phase 3 Checkpoint B observed canonical nested `item` across the complete 48-entry controlled playlist and
+no legacy `track` variant. The compatibility fallback was removed; canonical `item` is authoritative, and
+the deprecated `/playlists/{id}/tracks` endpoint remains prohibited.
