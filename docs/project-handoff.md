@@ -4,8 +4,8 @@
 
 - Repository: `C:\Users\USER\Desktop\Projects\Spotify-Taxonomy`
 - Branch: `dev`
-- Completed phases: 0, 1, 2, 3, 4, and 5
-- Current boundary: Phase 5 is complete; Phase 6 is next and has not started
+- Completed phases: 0, 1, 2, 3, 4, 5, and 6
+- Current boundary: Phase 6 is complete; Phase 7 has not started
 
 ## Phase 3 completion baseline
 
@@ -56,9 +56,8 @@ account ID, raw response, token, database, log, backup, export, or batch is sour
 
 ## Remaining roadmap
 
-5. Add derived characteristics and deterministic rules.
-6. Add review, overrides, and calibration.
-7. Add Codex supervised file-exchange classification.
+7. Add review, overrides, and calibration.
+8. Add Codex supervised file-exchange classification.
 9. Add desired state / dry-run synchronization.
 10. Run a managed-playlist provisioning pilot.
 11. Add guarded addition-only population.
@@ -91,9 +90,17 @@ structured statements and preserves contextual work/project scope. `research sho
 offline; `research run` requires explicit `--network` and a maximum of 25 IDs. No raw provider response,
 characteristic, playlist proposal, Genre variant result, or Spotify capability is produced.
 
+## Phase 6 completion
+
+Migration 6 persists deterministic, versioned, auditable evidence-to-characteristic derivations and
+review-required semantic proposals for explicit canonical IDs. Derivation/classification is offline and
+does not refresh research evidence. Unknown, insufficient, probable, contextual, stale, and contradictory
+evidence is not silently promoted. Semantic proposals remain separate from user decisions, while runtime
+Greek/Foreign routing remains later/downstream.
+
 ## Exact next action
 
-Phase 6 — derived characteristics and deterministic rules. Do not begin without separate authorization.
+Phase 7 — review, overrides, and calibration. Do not begin without separate authorization.
 
 ## Continuing safety boundary
 

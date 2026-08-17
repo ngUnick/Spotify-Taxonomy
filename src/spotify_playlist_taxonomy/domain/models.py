@@ -303,6 +303,11 @@ class DerivedCharacteristic:
     confidence: float
     derivation_version: str
     justification_summary: str
+    value_type: str = "string"
+    vocabulary_version: str | None = None
+    bundle_digest: str | None = None
+    state: str = "current"
+    input_digest: str | None = None
 
     def __post_init__(self) -> None:
         _validate_confidence(self.confidence)

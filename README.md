@@ -1,6 +1,9 @@
 # Spotify Playlist Taxonomy
 
-Phases 0 through 5 are complete. Phase 5 provides an evidence-only MusicBrainz/Wikidata research pipeline;
+Phases 0 through 6 are complete. Phase 6 adds an offline, deterministic and auditable path from persisted
+research evidence to versioned derived characteristics and explainable semantic proposals; proposals are not
+user-approved assignments. Unknown or insufficient evidence abstains rather than inferring a result, and
+probable, contextual, stale, or contradictory evidence is never silently promoted.
 live provider access remains an explicit operator action. Phase 4 provides an explicitly human-reviewed, source-controlled
 58-characteristic vocabulary, one reviewed specification for each of the 36 stable semantic playlists,
 centralized overlap guidance, 51 stable future output targets, an approved Greek/Foreign Genre routing
@@ -21,8 +24,8 @@ live validation. Spotify remained read-only throughout Phase 3. No modify scope 
 
 Phase 5 can gather compact provenance-aware evidence from MusicBrainz and Wikidata only through an explicit
 bounded `research run ... --network` command. Offline evidence/status inspection never contacts a provider.
-It does **not** derive characteristics, assign tracks, classify playlists, route Genre variants, create
-desired state, or modify Spotify.
+It does **not** assign tracks, route Genre variants, create desired state, or modify Spotify. Runtime
+Greek/Foreign routing remains downstream of semantic classification.
 
 The 15 Genre meanings remain unsplit. Each independently approved Genre membership will later route to a
 Greek or Foreign output target using exact-recording language and cultural-context evidence. Foreign means

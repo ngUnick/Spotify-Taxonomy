@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import sys
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -63,6 +64,7 @@ from spotify_playlist_taxonomy.workflows.research import (
     EvidenceSufficiencyService,
     ResearchCoordinator,
 )
+from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 
 DEFAULT_CONFIG_PATH = Path("config/application.yaml")
 
@@ -81,6 +83,8 @@ catalogue_identity_app = typer.Typer(no_args_is_help=True, help="Inspect account
 catalogue_match_app = typer.Typer(no_args_is_help=True, help="Review canonical matching candidates.")
 catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit canonical identity links.")
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
+derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characteristics from persisted evidence.")
+classify_app = typer.Typer(no_args_is_help=True, help="Evaluate offline semantic proposals from characteristics.")
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(database_app, name="db")
@@ -95,6 +99,8 @@ catalogue_app.add_typer(catalogue_identity_app, name="identity")
 catalogue_app.add_typer(catalogue_match_app, name="match")
 catalogue_app.add_typer(catalogue_link_app, name="link")
 app.add_typer(research_app, name="research")
+app.add_typer(derive_app, name="derive")
+app.add_typer(classify_app, name="classify")
 
 
 def _load_documents(config_path: Path) -> tuple[ApplicationConfig, TaxonomyDocument, Path]:
@@ -242,6 +248,23 @@ def _research_store(
         if current_schema_version(connection) < 5:
             raise PersistenceError("database requires migration 5; run 'db init'")
         yield config, paths, ResearchStore(connection)
+    finally:
+        connection.close()
+
+
+@contextmanager
+def _phase6_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase6Service]:
+    config_path = config_path.resolve()
+    config, _, _ = _load_documents(config_path)
+    paths = _paths(config, data_dir)
+    if not paths.database_path.is_file():
+        raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 6:
+            raise PersistenceError("database requires migration 6; run 'db init'")
+        yield Phase6Service(connection, load_phase4_bundle(config_path))
     finally:
         connection.close()
 
@@ -1053,5 +1076,72 @@ def research_status(
                     f"  provider={attempt['provider_id']}\toutcome={attempt['outcome']}\t"
                     f"reason={attempt['error_category'] or '-'}\tcache_hit={bool(attempt['cache_hit'])}"
                 )
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@derive_app.command("run")
+def derive_run(
+    canonical_ids: list[str] = typer.Argument(..., help="Explicit canonical recording IDs."),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Derive only from already-persisted local evidence; never refresh providers."""
+    try:
+        with _phase6_service(config_path, data_dir) as service:
+            total = 0
+            for canonical_id in canonical_ids:
+                total += len(service.persist_derivations(service.derive(canonical_id)))
+        _safe_echo(f"Derived: canonical_tracks={len(canonical_ids)} characteristics={total}")
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@derive_app.command("show")
+def derive_show(
+    canonical_id: str = typer.Argument(...),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show compact local characteristic provenance without contacting providers."""
+    try:
+        with _phase6_service(config_path, data_dir) as service:
+            items = service.characteristics(canonical_id)
+        _safe_echo(f"canonical_track_id: {canonical_id}")
+        for item in items:
+            _safe_echo(f"{item.name}\tstate={item.state}\tvalue={item.value}\trule={item.derivation_version}\tevidence={','.join(item.evidence_ids)}")
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@classify_app.command("run")
+def classify_run(
+    canonical_ids: list[str] = typer.Argument(..., help="Explicit canonical recording IDs."),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Evaluate reviewed semantic specifications from local derived characteristics."""
+    try:
+        with _phase6_service(config_path, data_dir) as service:
+            proposals = sum((len(service.classify(canonical_id)) for canonical_id in canonical_ids), 0)
+        _safe_echo(f"Classified: canonical_tracks={len(canonical_ids)} proposals={proposals}")
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@classify_app.command("show")
+def classify_show(
+    canonical_id: str = typer.Argument(...),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show persisted explainable proposals; this command makes no decisions."""
+    try:
+        with _phase6_service(config_path, data_dir) as service:
+            rows = service.proposals(canonical_id)
+        _safe_echo(f"canonical_track_id: {canonical_id}")
+        for row in rows:
+            explanation = json.loads(row["explanation_json"])
+            _safe_echo(f"{row['logical_playlist_id']}\tdecision={row['decision']}\tstate={row['proposal_state']}\tstrong={','.join(explanation['strong']) or '-'}\tnegative={','.join(explanation['negative']) or '-'}\thard_exclusions={','.join(explanation['hard_exclusions']) or '-'}")
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)

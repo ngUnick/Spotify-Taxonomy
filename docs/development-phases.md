@@ -3,7 +3,7 @@
 Each phase ends with tests, exact status/diff, unresolved decisions, and explicit user approval. Work stops
 at every checkpoint. A phase number does not itself authorize service access or external mutations.
 
-Current roadmap status: **PHASES 0–5 COMPLETE. PHASE 6 NEXT / NOT STARTED.**
+Current roadmap status: **PHASES 0–6 COMPLETE. PHASE 7 NEXT / NOT STARTED.**
 
 ## Phase 0 — policy baseline, architecture, skeleton and invariants (complete)
 
@@ -47,10 +47,14 @@ validated successful research, provenance, conservative probable matching, cache
 ambiguous/contradictory evidence for review. Provider calls remain explicit bounded `--network` actions;
 ordinary inspection and tests remain offline.
 
-## Phase 6 — derived characteristics and deterministic rules
+## Phase 6 — derived characteristics and deterministic rules (complete)
 
-Implement versioned evidence-to-characteristic logic and deterministic broad-genre/activity rules. Generated
-outputs remain proposals; tuning values remain configurable until real calibration.
+Implements versioned, offline evidence-to-characteristic derivation and generic reviewed-specification
+evaluation. Missing, stale, ambiguous, contextual, or contradictory evidence remains unknown or
+review-required; the result is an explainable proposal, never an assignment. No provider refresh, Spotify
+access, desired-state construction, output-target routing, or playlist write occurs here. Phase 7 owns
+human review, overrides, and calibration. Its successful local checkpoint confirmed repeatable abstention
+when evidence was insufficient; no provider or Spotify access occurred.
 
 ## Phase 7 — review, overrides, calibration
 
