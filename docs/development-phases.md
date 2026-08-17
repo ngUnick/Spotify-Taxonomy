@@ -3,7 +3,7 @@
 Each phase ends with tests, exact status/diff, unresolved decisions, and explicit user approval. Work stops
 at every checkpoint. A phase number does not itself authorize service access or external mutations.
 
-Current roadmap status: **PHASES 0–8 COMPLETE. PHASE 9 NOT STARTED.**
+Current roadmap status: **PHASES 0–9 COMPLETE. PHASE 10 NOT STARTED.**
 
 ## Phase 0 — policy baseline, architecture, skeleton and invariants (complete)
 
@@ -82,8 +82,15 @@ all generated proposals. Phase 8 performs no Spotify write, and Phase 9 is next 
 
 ## Phase 9 — desired state / dry-run synchronization
 
-Build effective desired state and addition-only diffs using a fake platform. State/digest/snapshot changes
-authoritatively invalidate approvals. Prove dry-run performs zero writes.
+Phase 9 derives concrete desired membership from effective reviewed state only: 36 semantic concepts route to
+51 configured targets. Greek/Foreign routing applies strictly after included Genre semantics through the
+reviewed routing policy; unresolved routing produces no guessed target. It is a local dry-run planner: a
+target without an authoritative concrete managed mapping is unprovisioned, authoritative absent membership
+is `would_add`, and present desired membership is `no_op`. Present-but-not-desired membership is informational
+only; no removal is planned or executable. Phase 9 performs zero Spotify writes. Phase 10 owns managed
+playlist provisioning and authoritative managed-target snapshots. Its local read-only checkpoint confirmed
+that an all-abstained, agreement-only effective state produces zero desired memberships and zero dry-run
+actions without introducing a review decision or any Spotify write.
 
 ## Phase 10 — managed-playlist provisioning pilot
 

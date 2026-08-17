@@ -67,6 +67,7 @@ from spotify_playlist_taxonomy.workflows.research import (
 from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
+from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 
 DEFAULT_CONFIG_PATH = Path("config/application.yaml")
 
@@ -91,6 +92,8 @@ review_app = typer.Typer(no_args_is_help=True, help="Review local semantic propo
 calibration_app = typer.Typer(no_args_is_help=True, help="Report observational local calibration.")
 codex_app = typer.Typer(no_args_is_help=True, help="Supervised offline Codex file exchange.")
 codex_batch_app = typer.Typer(no_args_is_help=True, help="Create and inspect outbound batches.")
+desired_app = typer.Typer(no_args_is_help=True, help="Show local derived concrete target memberships.")
+sync_app = typer.Typer(no_args_is_help=True, help="Build local read-only synchronization plans.")
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(database_app, name="db")
@@ -111,6 +114,8 @@ app.add_typer(review_app, name="review")
 app.add_typer(calibration_app, name="calibration")
 app.add_typer(codex_app, name="codex")
 codex_app.add_typer(codex_batch_app, name="batch")
+app.add_typer(desired_app, name="desired")
+app.add_typer(sync_app, name="sync")
 
 
 def _load_documents(config_path: Path) -> tuple[ApplicationConfig, TaxonomyDocument, Path]:
@@ -302,6 +307,17 @@ def _phase8_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase8
         assert_integrity(connection)
         if current_schema_version(connection)<8: raise PersistenceError("database requires migration 8; run 'db init'")
         yield Phase8Service(connection,load_phase4_bundle(config_path),paths.outbound_batch_dir)
+    finally: connection.close()
+
+@contextmanager
+def _phase9_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase9Service]:
+    config_path = config_path.resolve(); config, _, _ = _load_documents(config_path); paths = _paths(config, data_dir)
+    if not paths.database_path.is_file(): raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 8: raise PersistenceError("database requires migration 8; run 'db init'")
+        yield Phase9Service(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
 
@@ -1263,5 +1279,26 @@ def codex_batch_import(result_file: Path = typer.Argument(..., exists=True, dir_
     try:
         with _phase8_service(config_path, data_dir) as service: outcome = service.import_result(result_file)
         _safe_echo(f"batch_id: {outcome.batch_id}\nitems: {outcome.item_count}\nproposals: {outcome.proposal_count}\nstate: {outcome.state}\nidempotent: {outcome.idempotent}")
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+@desired_app.command("show")
+def desired_show(canonical_id: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    try:
+        with _phase9_service(config_path, data_dir) as service: state = service.desired(canonical_id)
+        _safe_echo(f"canonical_track_id: {state.canonical_track_id}")
+        for item in state.memberships:
+            _safe_echo(f"semantic={item.semantic_specification_id}\ttarget={item.output_target_id}\trouting={item.routing_outcome or '-'}\treason={item.reason}")
+        for item in state.unresolved:
+            _safe_echo(f"semantic={item.semantic_specification_id}\ttarget=-\trouting=unresolved\treason={item.reason}")
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+@sync_app.command("plan")
+def sync_plan(canonical_ids: list[str] = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    try:
+        with _phase9_service(config_path, data_dir) as service: plan = service.plan(tuple(canonical_ids))
+        for item in plan:
+            _safe_echo(f"canonical={item.canonical_track_id}\ttarget={item.output_target_id or '-'}\toutcome={item.outcome.value}\treason={item.reason}")
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
