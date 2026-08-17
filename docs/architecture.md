@@ -1,10 +1,14 @@
 # Phase 0 architecture
 
-Status: Phases 0 through 6 complete, 2026-08-17. Phase 0 boundaries remain authoritative. The Phase 4
+Status: Phases 0 through 7 complete, 2026-08-17. Phase 0 boundaries remain authoritative. The Phase 4
 source bundle is explicitly human-reviewed. Phase 5 evidence-only research implementation and its authorized
 live-provider checkpoint are complete. Phase 6 derives only evidence-supported characteristics and evaluates
 reviewed semantic specifications offline; its results remain review-required proposals. Its versioned rules
 and evidence references are locally auditable; runtime Genre-variant routing remains downstream.
+
+Phase 7 adds the distinct final local layers: `ResearchEvidence → DerivedCharacteristic →
+ClassificationProposal → UserReview/Override → EffectiveReviewedState`. User decisions outrank, but never
+erase, generated proposals; calibration compares those layers without automatic tuning or Spotify writes.
 
 ## Design principles
 

@@ -3,7 +3,7 @@
 Each phase ends with tests, exact status/diff, unresolved decisions, and explicit user approval. Work stops
 at every checkpoint. A phase number does not itself authorize service access or external mutations.
 
-Current roadmap status: **PHASES 0–6 COMPLETE. PHASE 7 NEXT / NOT STARTED.**
+Current roadmap status: **PHASES 0–7 COMPLETE. PHASE 8 NEXT / NOT STARTED.**
 
 ## Phase 0 — policy baseline, architecture, skeleton and invariants (complete)
 
@@ -56,10 +56,13 @@ access, desired-state construction, output-target routing, or playlist write occ
 human review, overrides, and calibration. Its successful local checkpoint confirmed repeatable abstention
 when evidence was insufficient; no provider or Spotify access occurred.
 
-## Phase 7 — review, overrides, calibration
+## Phase 7 — review, overrides, calibration (complete)
 
-Implement proposal review, explicit include/exclude decisions, supersession, effective assignments, and
-deliberately selected calibration examples before Codex classification exists.
+Adds local, auditable review history, explicit include/exclude/abstain decisions, reversible clears, and
+an effective state where an explicit user decision outranks a generated proposal. Calibration is
+observational reporting only: it never tunes rules or taxonomy. No desired state, routing, or Spotify write
+is created. The completed local checkpoint verified deterministic, conflict-focused queue behavior without
+creating any user decision; Phase 8 remains unstarted.
 
 ## Phase 8 — Codex supervised file-exchange classification
 

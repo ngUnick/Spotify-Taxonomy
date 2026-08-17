@@ -4,8 +4,8 @@
 
 - Repository: `C:\Users\USER\Desktop\Projects\Spotify-Taxonomy`
 - Branch: `dev`
-- Completed phases: 0, 1, 2, 3, 4, 5, and 6
-- Current boundary: Phase 6 is complete; Phase 7 has not started
+- Completed phases: 0, 1, 2, 3, 4, 5, 6, and 7
+- Current boundary: Phase 7 is complete; Phase 8 has not started
 
 ## Phase 3 completion baseline
 
@@ -56,7 +56,6 @@ account ID, raw response, token, database, log, backup, export, or batch is sour
 
 ## Remaining roadmap
 
-7. Add review, overrides, and calibration.
 8. Add Codex supervised file-exchange classification.
 9. Add desired state / dry-run synchronization.
 10. Run a managed-playlist provisioning pilot.
@@ -100,7 +99,7 @@ Greek/Foreign routing remains later/downstream.
 
 ## Exact next action
 
-Phase 7 — review, overrides, and calibration. Do not begin without separate authorization.
+Phase 8 — supervised Codex file-exchange classification. Do not begin without separate authorization.
 
 ## Continuing safety boundary
 

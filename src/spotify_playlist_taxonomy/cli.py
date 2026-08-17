@@ -36,7 +36,7 @@ from spotify_playlist_taxonomy.config import (
     taxonomy_digest,
 )
 from spotify_playlist_taxonomy.domain.ingestion import InboxKind, MatchCandidateState
-from spotify_playlist_taxonomy.domain.models import PlaylistRole
+from spotify_playlist_taxonomy.domain.models import AssignmentDecision, PlaylistRole
 from spotify_playlist_taxonomy.persistence import (
     BackupError,
     PersistenceError,
@@ -65,6 +65,7 @@ from spotify_playlist_taxonomy.workflows.research import (
     ResearchCoordinator,
 )
 from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
+from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 
 DEFAULT_CONFIG_PATH = Path("config/application.yaml")
 
@@ -85,6 +86,8 @@ catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit can
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
 derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characteristics from persisted evidence.")
 classify_app = typer.Typer(no_args_is_help=True, help="Evaluate offline semantic proposals from characteristics.")
+review_app = typer.Typer(no_args_is_help=True, help="Review local semantic proposals without network access.")
+calibration_app = typer.Typer(no_args_is_help=True, help="Report observational local calibration.")
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(database_app, name="db")
@@ -101,6 +104,8 @@ catalogue_app.add_typer(catalogue_link_app, name="link")
 app.add_typer(research_app, name="research")
 app.add_typer(derive_app, name="derive")
 app.add_typer(classify_app, name="classify")
+app.add_typer(review_app, name="review")
+app.add_typer(calibration_app, name="calibration")
 
 
 def _load_documents(config_path: Path) -> tuple[ApplicationConfig, TaxonomyDocument, Path]:
@@ -265,6 +270,21 @@ def _phase6_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase6
         if current_schema_version(connection) < 6:
             raise PersistenceError("database requires migration 6; run 'db init'")
         yield Phase6Service(connection, load_phase4_bundle(config_path))
+    finally:
+        connection.close()
+
+
+@contextmanager
+def _phase7_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase7Service]:
+    config_path = config_path.resolve()
+    config, _, _ = _load_documents(config_path)
+    paths = _paths(config, data_dir)
+    if not paths.database_path.is_file(): raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 7: raise PersistenceError("database requires migration 7; run 'db init'")
+        yield Phase7Service(connection, load_phase4_bundle(config_path))
     finally:
         connection.close()
 
@@ -1145,3 +1165,57 @@ def classify_show(
             _safe_echo(f"{row['logical_playlist_id']}\tdecision={row['decision']}\tstate={row['proposal_state']}\tstrong={','.join(explanation['strong']) or '-'}\tnegative={','.join(explanation['negative']) or '-'}\thard_exclusions={','.join(explanation['hard_exclusions']) or '-'}")
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
+
+
+def _render_effective(item: object) -> None:
+    value = item
+    _safe_echo(f"{value.logical_playlist_id}\tgenerated={value.generated or '-'}\texplicit={value.explicit or '-'}\teffective={value.effective or '-'}\tneeds_review={value.needs_review}\tstale={value.stale}")
+
+
+@review_app.command("queue")
+def review_queue(limit: int = typer.Option(25, "--limit", min=1, max=100), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    try:
+        with _phase7_service(config_path, data_dir) as service: items = service.queue(limit)
+        for item in items: _safe_echo(f"{item.canonical_track_id}\t"); _render_effective(item)
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
+
+
+@review_app.command("show")
+def review_show(canonical_id: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    try:
+        with _phase7_service(config_path, data_dir) as service: items = service.show(canonical_id)
+        _safe_echo(f"canonical_track_id: {canonical_id}")
+        for item in items: _render_effective(item)
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
+
+
+@review_app.command("decide")
+def review_decide(canonical_id: str = typer.Argument(...), semantic_id: str = typer.Argument(...), decision: AssignmentDecision = typer.Argument(...), note: str | None = typer.Option(None, "--note"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    try:
+        with _phase7_service(config_path, data_dir) as service: item = service.decide(canonical_id, semantic_id, decision, note)
+        _render_effective(item)
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
+
+
+@review_app.command("clear")
+def review_clear(canonical_id: str = typer.Argument(...), semantic_id: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    try:
+        with _phase7_service(config_path, data_dir) as service: item = service.clear(canonical_id, semantic_id)
+        _render_effective(item)
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
+
+
+@review_app.command("history")
+def review_history(canonical_id: str = typer.Argument(...), semantic_id: str | None = typer.Argument(None), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    try:
+        with _phase7_service(config_path, data_dir) as service: rows = service.history(canonical_id, semantic_id)
+        for row in rows: _safe_echo(f"{row['logical_playlist_id']}\taction={row['action']}\tdecision={row['decision'] or '-'}\tspecification={row['specification_version']}\tnote={row['note'] or '-'}")
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
+
+
+@calibration_app.command("show")
+def calibration_show(config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    try:
+        with _phase7_service(config_path, data_dir) as service: rows = service.calibration()
+        for row in rows: _safe_echo(f"{row['logical_playlist_id']}\treviewed={row['reviewed']}\tagreement={row['agreement']}\tinclude_rejected={row['include_rejected']}\tnoninclude_approved={row['noninclude_approved']}")
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
