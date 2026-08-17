@@ -3,7 +3,7 @@
 Each phase ends with tests, exact status/diff, unresolved decisions, and explicit user approval. Work stops
 at every checkpoint. A phase number does not itself authorize service access or external mutations.
 
-Current roadmap status: **PHASES 0–7 COMPLETE. PHASE 8 NEXT / NOT STARTED.**
+Current roadmap status: **PHASES 0–8 COMPLETE. PHASE 9 NOT STARTED.**
 
 ## Phase 0 — policy baseline, architecture, skeleton and invariants (complete)
 
@@ -62,12 +62,23 @@ Adds local, auditable review history, explicit include/exclude/abstain decisions
 an effective state where an explicit user decision outranks a generated proposal. Calibration is
 observational reporting only: it never tunes rules or taxonomy. No desired state, routing, or Spotify write
 is created. The completed local checkpoint verified deterministic, conflict-focused queue behavior without
-creating any user decision; Phase 8 remains unstarted.
+creating any user decision; Phase 8 follows as the supervised generated-classification boundary.
 
 ## Phase 8 — Codex supervised file-exchange classification
 
 Implement supervised, validated, resumable file export/import behind the classifier port without an embedded
 model API or frozen arbitrary batch defaults.
+
+Phase 8 implements a complete supervised file exchange: ResearchEvidence → DerivedCharacteristic →
+deterministic ClassificationProposal → validated outbound batch → manual Codex processing → untrusted
+inbound result → strict validation and transactional import → Codex-generated ClassificationProposal →
+Phase 7 human review/effective state. Codex/OpenAI is not an embedded runtime dependency and the application
+never sends a batch externally. Transfers are manual, outbound context is minimized, and title/artist remain
+excluded, along with Spotify/account/playlist/source identifiers and raw provider responses. Inbound result
+files are untrusted until strict validation succeeds; no chain-of-thought is requested or persisted. Imports
+are transactional and auditable; deterministic and Codex-generated proposals may coexist, generated-source
+disagreements remain reviewable, identical result replay is idempotent, and explicit user decisions outrank
+all generated proposals. Phase 8 performs no Spotify write, and Phase 9 is next and has not started.
 
 ## Phase 9 — desired state / dry-run synchronization
 

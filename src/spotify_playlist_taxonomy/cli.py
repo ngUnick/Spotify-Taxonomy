@@ -66,6 +66,7 @@ from spotify_playlist_taxonomy.workflows.research import (
 )
 from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
+from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
 
 DEFAULT_CONFIG_PATH = Path("config/application.yaml")
 
@@ -88,6 +89,8 @@ derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characterist
 classify_app = typer.Typer(no_args_is_help=True, help="Evaluate offline semantic proposals from characteristics.")
 review_app = typer.Typer(no_args_is_help=True, help="Review local semantic proposals without network access.")
 calibration_app = typer.Typer(no_args_is_help=True, help="Report observational local calibration.")
+codex_app = typer.Typer(no_args_is_help=True, help="Supervised offline Codex file exchange.")
+codex_batch_app = typer.Typer(no_args_is_help=True, help="Create and inspect outbound batches.")
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(database_app, name="db")
@@ -106,6 +109,8 @@ app.add_typer(derive_app, name="derive")
 app.add_typer(classify_app, name="classify")
 app.add_typer(review_app, name="review")
 app.add_typer(calibration_app, name="calibration")
+app.add_typer(codex_app, name="codex")
+codex_app.add_typer(codex_batch_app, name="batch")
 
 
 def _load_documents(config_path: Path) -> tuple[ApplicationConfig, TaxonomyDocument, Path]:
@@ -287,6 +292,17 @@ def _phase7_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase7
         yield Phase7Service(connection, load_phase4_bundle(config_path))
     finally:
         connection.close()
+
+@contextmanager
+def _phase8_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase8Service]:
+    config_path=config_path.resolve(); config,_,_=_load_documents(config_path); paths=_paths(config,data_dir)
+    if not paths.database_path.is_file(): raise PersistenceError("database does not exist; run 'db init'")
+    connection=connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection)<8: raise PersistenceError("database requires migration 8; run 'db init'")
+        yield Phase8Service(connection,load_phase4_bundle(config_path),paths.outbound_batch_dir)
+    finally: connection.close()
 
 
 @app.callback()
@@ -1169,7 +1185,7 @@ def classify_show(
 
 def _render_effective(item: object) -> None:
     value = item
-    _safe_echo(f"{value.logical_playlist_id}\tgenerated={value.generated or '-'}\texplicit={value.explicit or '-'}\teffective={value.effective or '-'}\tneeds_review={value.needs_review}\tstale={value.stale}")
+    _safe_echo(f"{value.logical_playlist_id}\tgenerated={value.generated or '-'}\tsources={','.join(value.generated_sources) or '-'}\texplicit={value.explicit or '-'}\teffective={value.effective or '-'}\tneeds_review={value.needs_review}\tstale={value.stale}")
 
 
 @review_app.command("queue")
@@ -1219,3 +1235,33 @@ def calibration_show(config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--co
         with _phase7_service(config_path, data_dir) as service: rows = service.calibration()
         for row in rows: _safe_echo(f"{row['logical_playlist_id']}\treviewed={row['reviewed']}\tagreement={row['agreement']}\tinclude_rejected={row['include_rejected']}\tnoninclude_approved={row['noninclude_approved']}")
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
+
+@codex_batch_app.command("create")
+def codex_batch_create(canonical_ids: list[str]=typer.Argument(...), config_path: Path=typer.Option(DEFAULT_CONFIG_PATH,"--config",exists=True,dir_okay=False), data_dir: Path|None=typer.Option(None,"--data-dir",file_okay=False)) -> None:
+    try:
+        with _phase8_service(config_path,data_dir) as service: batch_id,path=service.create(tuple(canonical_ids))
+        _safe_echo(f"batch_id: {batch_id}\noutbound_path: {path}")
+    except (OSError,LookupError,ValueError,ValidationError,PersistenceError) as error:_fail(error)
+
+@codex_batch_app.command("list")
+def codex_batch_list(limit:int=typer.Option(25,"--limit",min=1,max=100),config_path:Path=typer.Option(DEFAULT_CONFIG_PATH,"--config",exists=True,dir_okay=False),data_dir:Path|None=typer.Option(None,"--data-dir",file_okay=False))->None:
+    try:
+        with _phase8_service(config_path,data_dir) as service: rows=service.list(limit)
+        for row in rows:_safe_echo(f"{row['batch_id']}\tstate={row['state']}\titems={row['item_count']}\tproposals={row['proposal_count'] or 0}\timported={row['imported_at'] or '-'}\tschema={row['schema_version']}\ttaxonomy={row['taxonomy_version']}\tdigest={row['outbound_digest']}")
+    except (OSError,LookupError,ValueError,ValidationError,PersistenceError) as error:_fail(error)
+
+@codex_batch_app.command("show")
+def codex_batch_show(batch_id:str=typer.Argument(...),config_path:Path=typer.Option(DEFAULT_CONFIG_PATH,"--config",exists=True,dir_okay=False),data_dir:Path|None=typer.Option(None,"--data-dir",file_okay=False))->None:
+    try:
+        with _phase8_service(config_path,data_dir) as service: row,items=service.show(batch_id)
+        _safe_echo(f"batch_id: {row['batch_id']}\nstate: {row['state']}\nitems: {row['item_count']}\nproposals: {row['proposal_count'] or 0}\nimported_at: {row['imported_at'] or '-'}\noutbound_path: {row['outbound_path']}")
+        for item in items:_safe_echo(f"item_id: {item['item_id']}\tcanonical_ref: {item['canonical_track_id']}")
+    except (OSError,LookupError,ValueError,ValidationError,PersistenceError) as error:_fail(error)
+
+@codex_batch_app.command("import")
+def codex_batch_import(result_file: Path = typer.Argument(..., exists=True, dir_okay=False), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    try:
+        with _phase8_service(config_path, data_dir) as service: outcome = service.import_result(result_file)
+        _safe_echo(f"batch_id: {outcome.batch_id}\nitems: {outcome.item_count}\nproposals: {outcome.proposal_count}\nstate: {outcome.state}\nidempotent: {outcome.idempotent}")
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
