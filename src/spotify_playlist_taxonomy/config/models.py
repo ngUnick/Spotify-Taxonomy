@@ -7,6 +7,7 @@ import json
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypeVar
+from urllib.parse import urlparse
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -45,6 +46,7 @@ class ApplicationConfig(StrictModel):
     taxonomy_path: Path
     characteristic_vocabulary_path: Path
     specification_manifest_path: Path
+    research_policy_path: Path = Path("research.yaml")
     database_filename: str = "app.db"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     file_logging: bool = False
@@ -57,6 +59,61 @@ class ApplicationConfig(StrictModel):
         if not value.strip() or Path(value).name != value:
             raise ValueError("database_filename must be a nonblank filename")
         return value
+
+
+class ResearchProviderPolicy(StrictModel):
+    provider_id: Literal["musicbrainz", "wikidata"]
+    enabled: bool = True
+    adapter_version: str = Field(min_length=1)
+    api_url: str = Field(min_length=1)
+    query_url: str | None = None
+    user_agent: str = Field(min_length=1)
+    minimum_interval_seconds: float = Field(default=0, ge=0, le=60)
+
+    @model_validator(mode="after")
+    def validate_provider_endpoints(self) -> "ResearchProviderPolicy":
+        allowed = {
+            "musicbrainz": {"musicbrainz.org"},
+            "wikidata": {"www.wikidata.org", "query.wikidata.org"},
+        }
+        for value in (self.api_url, self.query_url):
+            if value is None:
+                continue
+            parsed = urlparse(value)
+            if parsed.scheme != "https" or parsed.hostname not in allowed[self.provider_id]:
+                raise ValueError("research provider URL is not an approved HTTPS endpoint")
+        if self.provider_id == "musicbrainz" and self.query_url is not None:
+            raise ValueError("MusicBrainz policy does not use a separate query endpoint")
+        if self.provider_id == "wikidata" and self.query_url is None:
+            raise ValueError("Wikidata policy requires the approved SPARQL endpoint")
+        if not self.adapter_version.strip() or not self.user_agent.strip():
+            raise ValueError("provider adapter_version/user_agent must not be blank")
+        return self
+
+
+class ResearchPolicyDocument(StrictModel):
+    schema_version: Literal["1"]
+    policy_version: str = Field(pattern=r"^research\.v[1-9][0-9]*$")
+    request_schema_version: str = Field(pattern=r"^research-request\.v[1-9][0-9]*$")
+    normalized_evidence_schema_version: str = Field(pattern=r"^research-evidence\.v[1-9][0-9]*$")
+    normalizer_version: str = Field(pattern=r"^evidence-normalizer\.v[1-9][0-9]*$")
+    default_limit: int = Field(default=10, ge=1, le=25)
+    hard_limit: Literal[25] = 25
+    request_timeout_seconds: float = Field(default=20, ge=1, le=120)
+    max_attempts: int = Field(default=3, ge=1, le=3)
+    positive_ttl_hours: int = Field(default=720, ge=1)
+    negative_ttl_hours: int = Field(default=24, ge=1)
+    ambiguous_ttl_hours: int = Field(default=24, ge=1)
+    providers: list[ResearchProviderPolicy] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_provider_registry(self) -> "ResearchPolicyDocument":
+        provider_ids = [item.provider_id for item in self.providers]
+        if len(provider_ids) != len(set(provider_ids)):
+            raise ValueError("research provider IDs must be unique")
+        if self.default_limit > self.hard_limit:
+            raise ValueError("default_limit cannot exceed hard_limit")
+        return self
 
 
 class TaxonomyPlaylistEntry(StrictModel):
@@ -565,6 +622,15 @@ def _load_yaml_mapping(path: Path) -> dict[str, object]:
 
 def load_application_config(path: Path) -> ApplicationConfig:
     return ApplicationConfig.model_validate(_load_yaml_mapping(path))
+
+
+def resolve_research_policy_path(config_path: Path, config: ApplicationConfig) -> Path:
+    path = config.research_policy_path
+    return path if path.is_absolute() else (config_path.parent / path).resolve()
+
+
+def load_research_policy_document(path: Path) -> ResearchPolicyDocument:
+    return ResearchPolicyDocument.model_validate(_load_yaml_mapping(path))
 
 
 def resolve_taxonomy_path(config_path: Path, config: ApplicationConfig) -> Path:

@@ -1,8 +1,8 @@
 # Phase 0 architecture
 
-Status: Phases 0 through 4 complete, 2026-08-17. Phase 0 boundaries remain authoritative. The Phase 4
-source bundle is explicitly human-reviewed. Phase 5 has not started, and Phase 4 introduced no research,
-classification execution, runtime synchronization, or Spotify access.
+Status: Phases 0 through 5 complete, 2026-08-17. Phase 0 boundaries remain authoritative. The Phase 4
+source bundle is explicitly human-reviewed. Phase 5 evidence-only research implementation and its authorized
+live-provider checkpoint are complete; Phase 6 characteristic derivation has not started.
 
 ## Design principles
 
@@ -116,8 +116,18 @@ classifier. Platform implementations map platform IDs to canonical IDs at their 
 
 SQLite is the V1 store under the resolved per-user runtime root. Phase 1 persists established domain
 concepts only: taxonomy revisions, catalogue identities/mappings, match assessments, playlist registrations,
-evidence, characteristics, proposals, decisions, and calibration selections. Workflow-owned research jobs,
-classification batches, desired assignments, sync plans, and operation journals remain deferred.
+evidence, characteristics, proposals, decisions, and calibration selections. Phase 5 adds research jobs,
+provider attempts/assertions, normalized evidence provenance, and cache/freshness state. Classification
+batches, desired assignments, sync plans, and operation journals remain deferred.
+
+## Phase 5 research boundary
+
+An explicit bounded canonical-ID request is fingerprinted with its ordered artists, version cues, and
+independent identifiers. The coordinator checks deterministic local cache state before invoking enabled
+MusicBrainz or Wikidata adapters. Provider assertions retain exact/probable/ambiguous/contextual match and
+recording/work/release/artist/project scope; only compact normalized evidence is persisted. MusicBrainz tags
+and ratings, Wikidata artist-to-recording inheritance, raw responses, playlist decisions, and Spotify state
+are excluded. Sufficiency is recomputed per evidence need and never produces a playlist score.
 
 ## Phase 4 source bundle
 

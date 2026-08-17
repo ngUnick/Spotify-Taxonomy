@@ -3,7 +3,7 @@
 Each phase ends with tests, exact status/diff, unresolved decisions, and explicit user approval. Work stops
 at every checkpoint. A phase number does not itself authorize service access or external mutations.
 
-Current roadmap status: **PHASES 0–4 COMPLETE. PHASE 5 NEXT / NOT STARTED.**
+Current roadmap status: **PHASES 0–5 COMPLETE. PHASE 6 NEXT / NOT STARTED.**
 
 ## Phase 0 — policy baseline, architecture, skeleton and invariants (complete)
 
@@ -36,12 +36,16 @@ The explicitly human-reviewed controlled vocabulary, exact 36-file semantic mani
 guidance, 51-target registry, Greek/Foreign Genre routing policy, strict schemas, deterministic bundle
 digest, semantic validation, and offline tests are complete. All 15 Genre, 10 Vibe, and 11 Activity
 specifications are `reviewed`. No runtime routing, definition synchronization, research, or classification
-execution was introduced; Phase 5 remains unstarted.
+execution was introduced during Phase 4.
 
 ## Phase 5 — independent research providers, caching, provenance, sufficiency
 
-Add progressive independent providers and cache normalized provenance-aware evidence. Evaluate sufficiency
-against the Phase 4 specifications/vocabulary before targeted research.
+The implementation adds conservative MusicBrainz and Wikidata read adapters, exact-recording subject
+fingerprints, compact provider assertions, normalized evidence, provenance, deterministic positive/negative
+caching, bounded retries, and explicit per-evidence-need sufficiency states. Its authorized local checkpoint
+validated successful research, provenance, conservative probable matching, cache reuse, and preservation of
+ambiguous/contradictory evidence for review. Provider calls remain explicit bounded `--network` actions;
+ordinary inspection and tests remain offline.
 
 ## Phase 6 — derived characteristics and deterministic rules
 

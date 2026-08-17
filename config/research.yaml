@@ -1,0 +1,26 @@
+schema_version: "1"
+policy_version: research.v1
+request_schema_version: research-request.v1
+normalized_evidence_schema_version: research-evidence.v1
+normalizer_version: evidence-normalizer.v1
+default_limit: 10
+hard_limit: 25
+request_timeout_seconds: 20
+max_attempts: 3
+positive_ttl_hours: 720
+negative_ttl_hours: 24
+ambiguous_ttl_hours: 24
+providers:
+  - provider_id: musicbrainz
+    enabled: true
+    adapter_version: musicbrainz.v1
+    api_url: https://musicbrainz.org/ws/2
+    user_agent: SpotifyPlaylistTaxonomy/0.0.0 (https://github.com/ngUnick/Spotify-Taxonomy)
+    minimum_interval_seconds: 1.0
+  - provider_id: wikidata
+    enabled: true
+    adapter_version: wikidata.v1
+    api_url: https://www.wikidata.org/w/api.php
+    query_url: https://query.wikidata.org/sparql
+    user_agent: SpotifyPlaylistTaxonomy/0.0.0 (https://github.com/ngUnick/Spotify-Taxonomy)
+    minimum_interval_seconds: 0.1

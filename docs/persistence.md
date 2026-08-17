@@ -71,6 +71,15 @@ unchanged here. The later managed-playlist/desired-state phase must migrate that
 registration to stable `output_target_id`, allowing Greek and Foreign targets to share one semantic Genre
 parent without relying on display names.
 
+## Phase 5 research state
+
+Migration 5 adds `research_jobs`, `research_provider_attempts`, `research_provider_assertions`, and
+`research_cache_entries`, and extends `research_evidence` with provider/query identity, subject fingerprint,
+scope/match, typed claim, quality, normalization version, freshness, invalidation, and content digest.
+Legacy evidence remains readable. Cache hits and retries are auditable, while contradiction groups and
+sufficiency reports remain deterministic computed views. No raw provider response or playlist assignment is
+stored.
+
 ## Backup and restore
 
 Backups use SQLite's consistent backup API and a small JSON manifest with schema/taxonomy/specification

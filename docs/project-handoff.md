@@ -4,8 +4,8 @@
 
 - Repository: `C:\Users\USER\Desktop\Projects\Spotify-Taxonomy`
 - Branch: `dev`
-- Completed phases: 0, 1, 2, 3, and 4
-- Current boundary: Phase 4 is complete and explicitly human-reviewed; Phase 5 is next and has not started
+- Completed phases: 0, 1, 2, 3, 4, and 5
+- Current boundary: Phase 5 is complete; Phase 6 is next and has not started
 
 ## Phase 3 completion baseline
 
@@ -44,7 +44,8 @@ account ID, raw response, token, database, log, backup, export, or batch is sour
 
 ## Known limitations and deferred work
 
-- No external research provider, research cache, sufficiency workflow, or live classification exists.
+- MusicBrainz and Wikidata have completed their authorized local provider checkpoint. Research remains
+  evidence-only; no classification has occurred.
 - Saved Tracks has no snapshot identifier, so its complete scan uses beginning/end total and initial-page
   signature checks rather than playlist-strength snapshot consistency.
 - The current Spotify platform may restrict playlist item access even when metadata discovery succeeds.
@@ -55,10 +56,9 @@ account ID, raw response, token, database, log, backup, export, or batch is sour
 
 ## Remaining roadmap
 
-5. Add independent research providers, caching, provenance, and sufficiency evaluation.
-6. Add derived characteristics and deterministic rules.
-7. Add review, overrides, and calibration.
-8. Add Codex supervised file-exchange classification.
+5. Add derived characteristics and deterministic rules.
+6. Add review, overrides, and calibration.
+7. Add Codex supervised file-exchange classification.
 9. Add desired state / dry-run synchronization.
 10. Run a managed-playlist provisioning pilot.
 11. Add guarded addition-only population.
@@ -82,15 +82,23 @@ routing remains unresolved for later human review rather than defaulting to Fore
 migration or runtime synchronization and performed no real classification, research, or Spotify access.
 The source bundle contains no track assignments or real catalogue/account metadata.
 
+## Phase 5 implementation boundary
+
+Migration 5 and the local coordinator persist compact provider assertions, normalized evidence provenance,
+cache/freshness state, and research attempts for explicit canonical IDs. MusicBrainz is limited to structured
+recording/version/work/release/credit relationships without tags or ratings. Wikidata is limited to supported
+structured statements and preserves contextual work/project scope. `research show` and `research status` are
+offline; `research run` requires explicit `--network` and a maximum of 25 IDs. No raw provider response,
+characteristic, playlist proposal, Genre variant result, or Spotify capability is produced.
+
 ## Exact next action
 
-Phase 5 — independent research providers, caching, provenance, and evidence sufficiency. Phase 5 has not
-started and requires separate explicit authorization.
+Phase 6 — derived characteristics and deterministic rules. Do not begin without separate authorization.
 
 ## Continuing safety boundary
 
 Any new Spotify read requires a separately approved endpoint boundary. Spotify writes and new OAuth scopes
-remain unauthorized. Research and classification have not started, and classification must remain
+remain unauthorized. Research remains evidence-only and classification must remain
 independent of the Spotify mutation path. Explicit user decisions outrank generated proposals. SOURCE and
 INBOX sources must never be modified, and playlist names must never confer authority. Future writes, if
 separately implemented and approved in later phases, may target only stable-ID MANAGED playlists through

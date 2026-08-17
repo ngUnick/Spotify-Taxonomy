@@ -1,8 +1,8 @@
 # Data retention and provenance policy
 
-Status: mandatory baseline through completed Phase 3. Data minimization is field-by-field: every persisted
-field needs an operational, audit, matching, review, or recovery purpose. Exact provider-specific
-time-to-live values remain a later decision when external research caching is introduced.
+Status: mandatory baseline through Phase 5. Data minimization is field-by-field: every persisted field needs
+an operational, audit, matching, review, or recovery purpose. Phase 5 defaults positive research results to
+30 days and exact negative/ambiguous results to 24 hours; shorter provider terms always take precedence.
 
 ## Storage locations
 
@@ -29,7 +29,7 @@ explicit, local, protected, and never committed.
 
 ## Prohibited durable data
 
-Do not persist raw Spotify response archives, access/refresh tokens, client secrets, unnecessary account or
+Do not persist raw Spotify or research-provider response archives, access/refresh tokens, client secrets, unnecessary account or
 profile data, artwork, audio, previews, audio analysis/features, listening-history profiles, Spotify
 recommendations/genre inference, popularity, arbitrary album metadata, copied webpages, large review
 passages, hidden model reasoning, or arbitrary debug dumps. Logs avoid title/artist by default and use local

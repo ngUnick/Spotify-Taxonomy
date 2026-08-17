@@ -1,6 +1,6 @@
 schema_version: "1"
 specification_set_version: specifications.v1
-taxonomy_version: taxonomy.v1
+taxonomy_version: taxonomy.v2
 characteristic_vocabulary_version: characteristics.v1
 output_target_set_version: output-targets.v1
 genre_variant_routing_policy_version: genre-variant-routing.v1

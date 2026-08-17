@@ -15,6 +15,7 @@ from .database import (
 )
 from .store import RecordConflictError, RecordNotFoundError, SQLiteStateStore
 from .phase3 import AccountMismatchError, Phase3StateError, Phase3Store
+from .research import CacheRecord, ResearchStore, ResearchSubject
 
 __all__ = [
     "BackupError", "BackupManifest", "MigrationError", "PersistenceError",
@@ -24,4 +25,5 @@ __all__ = [
     "assert_integrity", "connect_database", "current_schema_version",
     "sync_taxonomy", "taxonomy_state",
     "AccountMismatchError", "Phase3StateError", "Phase3Store",
+    "CacheRecord", "ResearchStore", "ResearchSubject",
 ]

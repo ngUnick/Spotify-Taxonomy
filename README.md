@@ -1,9 +1,10 @@
 # Spotify Playlist Taxonomy
 
-Phases 0 through 4 are complete. Phase 4 provides an explicitly human-reviewed, source-controlled
+Phases 0 through 5 are complete. Phase 5 provides an evidence-only MusicBrainz/Wikidata research pipeline;
+live provider access remains an explicit operator action. Phase 4 provides an explicitly human-reviewed, source-controlled
 58-characteristic vocabulary, one reviewed specification for each of the 36 stable semantic playlists,
 centralized overlap guidance, 51 stable future output targets, an approved Greek/Foreign Genre routing
-policy, and strict offline cross-document validation. Phase 5 is next and has not started.
+policy, and strict offline cross-document validation.
 
 The completed Phase 3 runtime has one playlist SOURCE publication (48 occurrences), the singleton Saved
 Tracks/Liked Songs INBOX publication (506 occurrences), and one explicitly selected playlist-backed Shazam
@@ -18,9 +19,10 @@ adoption links, candidates, interventions, and decision history are account-scop
 only `/playlists/{id}/items` and canonical nested `item`; the legacy nested-`track` fallback was removed after
 live validation. Spotify remained read-only throughout Phase 3. No modify scope or Spotify writer exists.
 
-The Phase 4 documents define classification inputs only. They do **not** execute characteristic derivation,
-assign tracks, run research/classification, synchronize definitions into SQLite, finalize desired state,
-create synchronization plans, or modify Spotify.
+Phase 5 can gather compact provenance-aware evidence from MusicBrainz and Wikidata only through an explicit
+bounded `research run ... --network` command. Offline evidence/status inspection never contacts a provider.
+It does **not** derive characteristics, assign tracks, classify playlists, route Genre variants, create
+desired state, or modify Spotify.
 
 The 15 Genre meanings remain unsplit. Each independently approved Genre membership will later route to a
 Greek or Foreign output target using exact-recording language and cultural-context evidence. Foreign means
@@ -89,6 +91,9 @@ spotify-taxonomy catalogue match confirm-new CANDIDATE_ID
 spotify-taxonomy catalogue match reject CANDIDATE_ID
 spotify-taxonomy catalogue link list
 spotify-taxonomy catalogue link unlink IDENTITY_ID
+spotify-taxonomy research run CANONICAL_ID... --network
+spotify-taxonomy research show CANONICAL_ID
+spotify-taxonomy research status [CANONICAL_ID]
 ```
 
 Catalogue review commands are local and scoped to the active account binding. They deliberately show only

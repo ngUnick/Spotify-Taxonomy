@@ -1,5 +1,5 @@
 schema_version: "1"
-taxonomy_version: taxonomy.v1
+taxonomy_version: taxonomy.v2
 playlists:
   - {logical_id: genre.pop, dimension: genre, display_name: Pop, enabled: true, specification_status: reviewed}
   - {logical_id: genre.rock, dimension: genre, display_name: Rock, enabled: true, specification_status: reviewed}

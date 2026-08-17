@@ -71,6 +71,6 @@ values, and emits a deterministic bundle digest covering both new documents. It 
 database, Spotify reader, credential, or network service.
 
 All 36 specifications, the manifest, and the controlled vocabulary are `reviewed` following explicit human
-approval. Phase 4 is complete. These documents remain source definitions only: Phase 5 has not started, and
-no research provider, characteristic derivation, classifier, runtime routing executor, desired-state builder,
+approval. Phase 4 is complete. These documents remain source definitions only: Phase 5 now supplies
+evidence-only research providers, but no characteristic derivation, classifier, runtime routing executor, desired-state builder,
 or Spotify writer is implied by review status.

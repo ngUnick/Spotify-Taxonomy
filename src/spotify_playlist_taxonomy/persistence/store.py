@@ -242,13 +242,24 @@ class SQLiteStateStore:
                 """
                 INSERT INTO research_evidence(
                     evidence_id, canonical_track_id, source, kind, normalized_value,
-                    source_reference, confidence, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    source_reference, confidence, created_at, provider_assertion_id,
+                    provider_id, provider_version, request_id, query_id, subject_fingerprint,
+                    subject_scope, subject_match, evidence_type, claim_key, quality_band,
+                    normalized_schema_version, normalizer_version, retrieved_at, fresh_until,
+                    evidence_state, content_digest, invalidated_at, invalidation_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     evidence.evidence_id, evidence.canonical_track_id, evidence.source.value,
                     evidence.kind.value, evidence.normalized_value, evidence.source_reference,
-                    evidence.confidence, utc_now(),
+                    evidence.confidence, utc_now(), evidence.provider_assertion_id,
+                    evidence.provider_id, evidence.provider_version, evidence.request_id,
+                    evidence.query_id, evidence.subject_fingerprint, evidence.subject_scope,
+                    evidence.subject_match, evidence.evidence_type, evidence.claim_key,
+                    evidence.quality_band, evidence.normalized_schema_version,
+                    evidence.normalizer_version, evidence.retrieved_at, evidence.fresh_until,
+                    evidence.evidence_state, evidence.content_digest, evidence.invalidated_at,
+                    evidence.invalidation_reason,
                 ),
             )
 
@@ -260,6 +271,13 @@ class SQLiteStateStore:
         return ResearchEvidence(
             row["evidence_id"], row["canonical_track_id"], ResearchSource(row["source"]),
             EvidenceKind(row["kind"]), row["normalized_value"], row["source_reference"], row["confidence"],
+            row["provider_assertion_id"], row["provider_id"], row["provider_version"],
+            row["request_id"], row["query_id"], row["subject_fingerprint"],
+            row["subject_scope"], row["subject_match"], row["evidence_type"],
+            row["claim_key"], row["quality_band"], row["normalized_schema_version"],
+            row["normalizer_version"], row["retrieved_at"], row["fresh_until"],
+            row["evidence_state"], row["content_digest"], row["invalidated_at"],
+            row["invalidation_reason"],
         )
 
     def save_characteristic(self, item: DerivedCharacteristic) -> None:

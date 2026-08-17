@@ -2,10 +2,20 @@
 
 from .phase3 import DIGEST_VERSION, MATCHER_VERSION, Phase3Coordinator
 from .review import Phase3ReviewService
+from .research import (
+    EvidenceNormalizer,
+    EvidenceSufficiencyService,
+    ResearchCoordinator,
+    subject_fingerprint,
+)
 
 __all__ = [
     "DIGEST_VERSION",
     "MATCHER_VERSION",
     "Phase3Coordinator",
     "Phase3ReviewService",
+    "EvidenceNormalizer",
+    "EvidenceSufficiencyService",
+    "ResearchCoordinator",
+    "subject_fingerprint",
 ]

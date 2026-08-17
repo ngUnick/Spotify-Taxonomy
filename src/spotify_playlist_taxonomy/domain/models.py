@@ -24,6 +24,7 @@ class ResearchSource(StrEnum):
 
     LASTFM = "lastfm"
     MUSICBRAINZ = "musicbrainz"
+    WIKIDATA = "wikidata"
     WIKIPEDIA = "wikipedia"
     OFFICIAL_ARTIST = "official_artist"
     OFFICIAL_LABEL = "official_label"
@@ -224,6 +225,25 @@ class ResearchEvidence:
     normalized_value: str
     source_reference: str | None = None
     confidence: float | None = None
+    provider_assertion_id: str | None = None
+    provider_id: str | None = None
+    provider_version: str | None = None
+    request_id: str | None = None
+    query_id: str | None = None
+    subject_fingerprint: str | None = None
+    subject_scope: str | None = None
+    subject_match: str | None = None
+    evidence_type: str | None = None
+    claim_key: str | None = None
+    quality_band: str | None = None
+    normalized_schema_version: str | None = None
+    normalizer_version: str | None = None
+    retrieved_at: str | None = None
+    fresh_until: str | None = None
+    evidence_state: str = "active"
+    content_digest: str | None = None
+    invalidated_at: str | None = None
+    invalidation_reason: str | None = None
 
     def __post_init__(self) -> None:
         _validate_nonblank("evidence_id", self.evidence_id)
@@ -233,6 +253,43 @@ class ResearchEvidence:
             _validate_nonblank("source_reference", self.source_reference)
         if self.confidence is not None:
             _validate_confidence(self.confidence)
+        optional_nonblank = (
+            ("provider_assertion_id", self.provider_assertion_id),
+            ("provider_id", self.provider_id),
+            ("provider_version", self.provider_version),
+            ("request_id", self.request_id),
+            ("query_id", self.query_id),
+            ("subject_fingerprint", self.subject_fingerprint),
+            ("subject_scope", self.subject_scope),
+            ("subject_match", self.subject_match),
+            ("evidence_type", self.evidence_type),
+            ("claim_key", self.claim_key),
+            ("quality_band", self.quality_band),
+            ("normalized_schema_version", self.normalized_schema_version),
+            ("normalizer_version", self.normalizer_version),
+            ("retrieved_at", self.retrieved_at),
+            ("fresh_until", self.fresh_until),
+            ("content_digest", self.content_digest),
+            ("invalidated_at", self.invalidated_at),
+            ("invalidation_reason", self.invalidation_reason),
+        )
+        for name, value in optional_nonblank:
+            if value is not None:
+                _validate_nonblank(name, value)
+        if self.evidence_state not in {"active", "stale", "invalidated"}:
+            raise ValueError("unsupported evidence_state")
+        if self.subject_scope is not None and self.subject_scope not in {
+            "recording", "work", "release", "artist", "project"
+        }:
+            raise ValueError("unsupported subject_scope")
+        if self.subject_match is not None and self.subject_match not in {
+            "exact", "probable", "ambiguous", "contextual"
+        }:
+            raise ValueError("unsupported subject_match")
+        if self.quality_band is not None and self.quality_band not in {
+            "high", "medium", "low", "unknown"
+        }:
+            raise ValueError("unsupported quality_band")
 
 
 @dataclass(frozen=True, slots=True)

@@ -43,7 +43,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_repository_taxonomy_has_exact_stable_ids(self) -> None:
         document = load_taxonomy_document(ROOT / "config" / "taxonomy.yaml")
         self.assertEqual("1", document.schema_version)
-        self.assertEqual("taxonomy.v1", document.taxonomy_version)
+        self.assertEqual("taxonomy.v2", document.taxonomy_version)
         self.assertEqual(EXPECTED_IDS, {item.logical_id for item in document.playlists})
         self.assertEqual(36, len(document.playlists))
 

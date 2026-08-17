@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Iterator, TextIO
 
@@ -26,9 +27,11 @@ from spotify_playlist_taxonomy.config import (
     Phase4ValidationError,
     TaxonomyDocument,
     load_application_config,
+    load_research_policy_document,
     load_phase4_bundle,
     load_taxonomy_document,
     resolve_taxonomy_path,
+    resolve_research_policy_path,
     taxonomy_digest,
 )
 from spotify_playlist_taxonomy.domain.ingestion import InboxKind, MatchCandidateState
@@ -45,11 +48,21 @@ from spotify_playlist_taxonomy.persistence import (
     restore_backup,
     sync_taxonomy,
     taxonomy_state,
+    ResearchStore,
 )
+from spotify_playlist_taxonomy.adapters.research import (
+    MusicBrainzResearchProvider,
+    WikidataResearchProvider,
+)
+from spotify_playlist_taxonomy.domain.research import SufficiencyState
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3StateError, Phase3Store
 from spotify_playlist_taxonomy.runtime import RuntimePaths, discover_repository_root
 from spotify_playlist_taxonomy.workflows.phase3 import Phase3Coordinator
 from spotify_playlist_taxonomy.workflows.review import Phase3ReviewService
+from spotify_playlist_taxonomy.workflows.research import (
+    EvidenceSufficiencyService,
+    ResearchCoordinator,
+)
 
 DEFAULT_CONFIG_PATH = Path("config/application.yaml")
 
@@ -67,6 +80,7 @@ catalogue_app = typer.Typer(no_args_is_help=True, help="Review the local canonic
 catalogue_identity_app = typer.Typer(no_args_is_help=True, help="Inspect account-scoped track identities.")
 catalogue_match_app = typer.Typer(no_args_is_help=True, help="Review canonical matching candidates.")
 catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit canonical identity links.")
+research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(database_app, name="db")
@@ -80,6 +94,7 @@ app.add_typer(catalogue_app, name="catalogue")
 catalogue_app.add_typer(catalogue_identity_app, name="identity")
 catalogue_app.add_typer(catalogue_match_app, name="match")
 catalogue_app.add_typer(catalogue_link_app, name="link")
+app.add_typer(research_app, name="research")
 
 
 def _load_documents(config_path: Path) -> tuple[ApplicationConfig, TaxonomyDocument, Path]:
@@ -213,6 +228,24 @@ def _phase3_review(store: Phase3Store) -> Phase3ReviewService:
     return Phase3ReviewService(store=store, binding_id=binding.binding_id)
 
 
+@contextmanager
+def _research_store(
+    config_path: Path, data_dir: Path | None,
+) -> Iterator[tuple[ApplicationConfig, RuntimePaths, ResearchStore]]:
+    config, _, _ = _load_documents(config_path)
+    paths = _paths(config, data_dir)
+    if not paths.database_path.is_file():
+        raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 5:
+            raise PersistenceError("database requires migration 5; run 'db init'")
+        yield config, paths, ResearchStore(connection)
+    finally:
+        connection.close()
+
+
 @app.callback()
 def root(
     version: bool = typer.Option(False, "--version", help="Show the application version."),
@@ -229,6 +262,10 @@ def validate_config(
     """Validate the complete source-controlled taxonomy bundle without runtime state."""
     try:
         bundle = load_phase4_bundle(config_path)
+        config = load_application_config(config_path.resolve())
+        research_policy = load_research_policy_document(
+            resolve_research_policy_path(config_path.resolve(), config)
+        )
         taxonomy = bundle.taxonomy
         typer.echo(
             f"Valid: taxonomy={taxonomy.taxonomy_version} playlists={len(taxonomy.playlists)} "
@@ -237,6 +274,8 @@ def validate_config(
             f"output_targets={len(bundle.output_targets.targets)} "
             f"routing={bundle.genre_variant_routing.routing_policy_version} "
             f"status={bundle.manifest.status.value} "
+            f"research_policy={research_policy.policy_version} "
+            f"research_providers={len([item for item in research_policy.providers if item.enabled])} "
             f"digest={bundle.digest} source={bundle.taxonomy_path}"
         )
     except (OSError, ValueError, ValidationError, Phase4ValidationError) as error:
@@ -863,4 +902,156 @@ def catalogue_link_unlink(
             _phase3_review(store).unlink(identity_id)
         typer.echo("Platform identity unlinked.")
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+def _load_research_policy(config_path: Path, config: ApplicationConfig):
+    return load_research_policy_document(
+        resolve_research_policy_path(config_path.resolve(), config)
+    )
+
+
+@research_app.command("run")
+def research_run(
+    canonical_ids: list[str] = typer.Argument(..., help="Explicit canonical recording IDs."),
+    network: bool = typer.Option(False, "--network", help="Explicitly permit provider network reads."),
+    provider_id: str | None = typer.Option(None, "--provider"),
+    refresh: bool = typer.Option(False, "--refresh", help="Bypass fresh and negative cache entries."),
+    limit: int | None = typer.Option(None, "--limit", min=1, max=25),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Research an explicit bounded set; this is the only network-enabled research command."""
+    try:
+        if not network:
+            raise ValueError("research network access requires explicit --network")
+        config_path = config_path.resolve()
+        bundle = load_phase4_bundle(config_path)
+        with _research_store(config_path, data_dir) as (config, _, store):
+            policy = _load_research_policy(config_path, config)
+            with httpx.Client(
+                timeout=policy.request_timeout_seconds,
+                verify=True,
+                follow_redirects=False,
+                trust_env=False,
+            ) as http_client:
+                providers = []
+                for item in policy.providers:
+                    if not item.enabled:
+                        continue
+                    if item.provider_id == "musicbrainz":
+                        providers.append(MusicBrainzResearchProvider(client=http_client, policy=item))
+                    elif item.provider_id == "wikidata":
+                        providers.append(WikidataResearchProvider(client=http_client, policy=item))
+                summary = ResearchCoordinator(
+                    store=store, providers=providers, policy=policy,
+                    phase4_bundle_digest=bundle.digest,
+                ).run(tuple(canonical_ids), provider_id=provider_id, refresh=refresh, limit=limit)
+        _safe_echo(
+            f"Research complete: jobs={len(summary.job_ids)} provider_calls={summary.provider_calls} "
+            f"cache_hits={summary.cache_hits} evidence_created={summary.evidence_created}"
+        )
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@research_app.command("show")
+def research_show(
+    canonical_id: str = typer.Argument(...),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Deliberately inspect normalized local evidence and compact provenance offline."""
+    try:
+        with _research_store(config_path, data_dir) as (_, _, store):
+            store.subject(canonical_id)
+            evidence = store.evidence_for_track(canonical_id)
+        _safe_echo(f"canonical_track_id: {canonical_id}")
+        _safe_echo(f"evidence_count: {len(evidence)}")
+        for item in evidence:
+            _safe_echo(
+                f"{item.evidence_id}\ttype={item.evidence_type or 'legacy'}\t"
+                f"provider={item.provider_id or item.source.value}\t"
+                f"scope={item.subject_scope or 'legacy'}\tmatch={item.subject_match or 'legacy'}\t"
+                f"quality={item.quality_band or 'unknown'}\tstate={item.evidence_state}\t"
+                f"value={item.normalized_value}\tsource={item.source_reference or 'none'}"
+            )
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@research_app.command("status")
+def research_status(
+    canonical_id: str | None = typer.Argument(None),
+    state: str | None = typer.Option(None, "--state"),
+    limit: int = typer.Option(10, "--limit", min=1, max=25),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show provider-independent evidence sufficiency offline."""
+    try:
+        selected_state = SufficiencyState(state) if state is not None else None
+        config_path = config_path.resolve()
+        bundle = load_phase4_bundle(config_path)
+        with _research_store(config_path, data_dir) as (config, _, store):
+            policy = _load_research_policy(config_path, config)
+            descriptors = []
+            # Descriptors are static and constructing them with a non-networking client performs no I/O.
+            with httpx.Client(
+                transport=httpx.MockTransport(lambda request: (_ for _ in ()).throw(
+                    AssertionError("offline status attempted network access")
+                )),
+                trust_env=False,
+            ) as offline_client:
+                for item in policy.providers:
+                    if item.provider_id == "musicbrainz" and item.enabled:
+                        descriptors.append(MusicBrainzResearchProvider(
+                            client=offline_client, policy=item
+                        ).descriptor)
+                    elif item.provider_id == "wikidata" and item.enabled:
+                        descriptors.append(WikidataResearchProvider(
+                            client=offline_client, policy=item
+                        ).descriptor)
+            service = EvidenceSufficiencyService(
+                store=store, descriptors=tuple(descriptors),
+                phase4_bundle_digest=bundle.digest,
+            )
+            if canonical_id is not None:
+                store.subject(canonical_id)
+                canonical_ids = (canonical_id,)
+            else:
+                canonical_ids = tuple(
+                    row[0] for row in store.connection.execute(
+                        "SELECT DISTINCT canonical_track_id FROM research_jobs "
+                        "ORDER BY canonical_track_id LIMIT ?", (limit,)
+                    )
+                )
+            now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            reports = tuple(service.assess(value, now=now) for value in canonical_ids)
+            attempts = {
+                value: store.attempts_for_track(value)
+                for value in canonical_ids
+            }
+        for report in reports:
+            visible = tuple(
+                item for item in report.assessments
+                if selected_state is None or item.state is selected_state
+            )
+            _safe_echo(
+                f"{report.canonical_track_id}\tbundle={report.phase4_bundle_digest}\t"
+                f"needs={len(visible)}"
+            )
+            for item in visible:
+                _safe_echo(
+                    f"  {item.evidence_type.value}\tstate={item.state.value}\t"
+                    f"action={item.next_action.value}\tevidence={len(item.evidence_ids)}\t"
+                    f"providers={','.join(item.providers_consulted) or 'none'}\t"
+                    f"reasons={','.join(item.reason_codes)}"
+                )
+            for attempt in attempts[report.canonical_track_id]:
+                _safe_echo(
+                    f"  provider={attempt['provider_id']}\toutcome={attempt['outcome']}\t"
+                    f"reason={attempt['error_category'] or '-'}\tcache_hit={bool(attempt['cache_hit'])}"
+                )
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
