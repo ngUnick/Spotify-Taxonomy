@@ -1,0 +1,39 @@
+schema_version: "2"
+specification_version: spec.activity.road_trip.v1
+logical_playlist_id: activity.road_trip
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings that remain engaging, comfortable, and journey-suitable across extended travel, including reflective and shared-listening material.
+dimension_basis: functional_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: High travel endurance with sustained engagement
+    match: all
+    conditions:
+      - {characteristic_id: functional.travel_endurance, operator: at_least, values: [high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+    rationale: Road Trip prioritizes extended journey suitability rather than only driving mechanics.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Shared energy, memorable emotion, or comfortable continuity
+    match: any
+    conditions:
+      - {characteristic_id: functional.social_activation, operator: at_least, values: [medium]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [joyful, nostalgic, warm, triumphant]}
+      - {characteristic_id: tempo_rhythm.rhythmic_stability, operator: at_least, values: [medium]}
+    rationale: Road trips may be communal, reflective, or expansive, so several support profiles are valid.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: High fatigue risk or repeated disruption over time
+    match: any
+    conditions:
+      - {characteristic_id: functional.fatigue_risk, operator: at_least, values: [very_high]}
+      - {characteristic_id: structure_attention.abrupt_change_risk, operator: at_least, values: [very_high]}
+    rationale: Extended exposure makes fatigue and repeated disruption materially relevant.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Road Trip does not imply Driving and need not be consistently high-energy; extended journey fit is the independent requirement.]
+version_guidance: [Very long, live, or alternate versions require reassessment for fatigue and travel endurance.]
+instrumental_vocal_guidance: [Both vocal and instrumental recordings qualify; communal singalong potential is optional rather than required.]
+overlap_refs: [activity.driving__activity.night_driving__activity.road_trip, activity.party__activity.road_trip__vibe.uplifting_feel_good]

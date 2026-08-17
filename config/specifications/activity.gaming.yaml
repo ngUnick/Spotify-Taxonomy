@@ -1,0 +1,60 @@
+schema_version: "2"
+specification_version: spec.activity.gaming.v1
+logical_playlist_id: activity.gaming
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings that support interactive gameplay through immersive atmosphere, responsive action, or strategic focus without prescribing one genre or intensity.
+dimension_basis: functional_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Immersive or atmospheric gameplay support
+    match: all
+    conditions:
+      - {characteristic_id: functional.interactive_engagement, operator: at_least, values: [high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [immersive, cinematic, futuristic, mysterious]}
+    rationale: Environmental immersion or world-building qualifies only when the recording also supports continuing interactive engagement.
+  - indicator_id: strong.002
+    summary: Action or responsive gameplay support
+    match: all
+    conditions:
+      - {characteristic_id: functional.interactive_engagement, operator: at_least, values: [high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+      - {characteristic_id: functional.movement_support, operator: at_least, values: [high]}
+      - {characteristic_id: tempo_rhythm.rhythmic_drive, operator: at_least, values: [high]}
+      - {characteristic_id: functional.personal_activation, operator: at_least, values: [high]}
+    rationale: Action, competitive, combat, racing, rhythm, or arcade use can qualify through responsive activation without cinematic atmosphere.
+  - indicator_id: strong.003
+    summary: Strategic or focus-oriented gameplay support
+    match: all
+    conditions:
+      - {characteristic_id: functional.interactive_engagement, operator: at_least, values: [high]}
+      - {characteristic_id: functional.focus_support, operator: at_least, values: [high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+      - {characteristic_id: structure_attention.distraction_risk, operator: at_most, values: [medium]}
+    rationale: Strategy, management, simulation, tactical, puzzle, or building contexts qualify through interactive focus support rather than generic work productivity.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Rhythmic drive, prominent atmosphere, manageable focus, or responsive activation
+    match: any
+    conditions:
+      - {characteristic_id: tempo_rhythm.rhythmic_drive, operator: at_least, values: [medium]}
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_least, values: [high]}
+      - {characteristic_id: functional.movement_support, operator: at_least, values: [medium]}
+      - {characteristic_id: structure_attention.attention_demand, operator: at_most, values: [medium]}
+    rationale: Different gaming contexts use action, strategy, or atmosphere, so secondary qualities reinforce but do not replace interactive engagement.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: High distraction without useful interactive engagement
+    match: all
+    conditions:
+      - {characteristic_id: structure_attention.distraction_risk, operator: at_least, values: [very_high]}
+      - {characteristic_id: functional.interactive_engagement, operator: at_most, values: [low]}
+    rationale: Disruptive salience without interactive support competes with gameplay rather than serving it.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Atmospheric, action-responsive, and strategic-focus routes are independent; generic engagement, productivity support, force, or atmosphere without interactive context remains insufficient.]
+version_guidance: [Long mixes, edits, and live versions are assessed for continuity and distraction in the exact recording.]
+instrumental_vocal_guidance: [Vocals are permitted when they support rather than repeatedly interrupt engagement.]
+overlap_refs: [activity.night_driving__activity.gaming__vibe.dreamy_atmospheric, activity.gaming__activity.coding_focus__vibe.hype__vibe.dreamy_atmospheric, activity.gaming__activity.background_music__vibe.euphoric_energetic]

@@ -4,10 +4,8 @@
 
 - Repository: `C:\Users\USER\Desktop\Projects\Spotify-Taxonomy`
 - Branch: `dev`
-- Current HEAD: `35332a50694e879ebbce1dac33121c821043d109`
-- Remote baseline: `dev` synchronized with `origin/dev` before these documentation-only changes
-- Completed phases: 0, 1, 2, and 3
-- Current boundary: Phase 4 is next and has not started
+- Completed phases: 0, 1, 2, 3, and 4
+- Current boundary: Phase 4 is complete and explicitly human-reviewed; Phase 5 is next and has not started
 
 ## Phase 3 completion baseline
 
@@ -46,7 +44,6 @@ account ID, raw response, token, database, log, backup, export, or batch is sour
 
 ## Known limitations and deferred work
 
-- Phase 4 taxonomy specifications and characteristic vocabulary are not finalized.
 - No external research provider, research cache, sufficiency workflow, or live classification exists.
 - Saved Tracks has no snapshot identifier, so its complete scan uses beginning/end total and initial-page
   signature checks rather than playlist-strength snapshot consistency.
@@ -58,7 +55,6 @@ account ID, raw response, token, database, log, backup, export, or batch is sour
 
 ## Remaining roadmap
 
-4. Finalize V1 taxonomy specifications and characteristic vocabulary.
 5. Add independent research providers, caching, provenance, and sufficiency evaluation.
 6. Add derived characteristics and deterministic rules.
 7. Add review, overrides, and calibration.
@@ -68,11 +64,28 @@ account ID, raw response, token, database, log, backup, export, or batch is sour
 11. Add guarded addition-only population.
 12. Add periodic inbox processing / V1 hardening.
 
+## Phase 4 completion
+
+Application configuration schema v3 references a source-controlled, explicitly reviewed
+`characteristics.v1` vocabulary and specification manifest. The manifest covers exactly the unchanged 36
+stable logical playlist IDs and maps them to 15 Genre, 10 Vibe, and 11 Activity specification files plus
+centralized overlap guidance. The 15
+Genre meanings remain semantic definitions; a separate registry expands them to Greek and Foreign targets,
+while Vibe and Activity remain unsplit, for 51 future concrete targets. The vocabulary contains 58 reusable
+characteristics in 13 families, including version-sensitive language and cultural-context routing inputs.
+Strict offline loading validates paths, versions, statuses, references, typed operators/values, required
+overlap groups, target coverage, the closed routing policy, and a deterministic full-bundle digest.
+
+All 36 specifications, the manifest, and the 58-characteristic vocabulary are `reviewed`. Greek/Foreign
+routing remains downstream from semantic Genre classification; balanced, missing, and genuinely ambiguous
+routing remains unresolved for later human review rather than defaulting to Foreign. Phase 4 added no
+migration or runtime synchronization and performed no real classification, research, or Spotify access.
+The source bundle contains no track assignments or real catalogue/account metadata.
+
 ## Exact next action
 
-Prepare and finalize the Phase 4 plan for **Phase 4 — taxonomy specifications and characteristic
-vocabulary**. Do not implement Phase 4, access a research provider, classify real catalogue data, or expand
-the taxonomy until the user explicitly authorizes that phase.
+Phase 5 — independent research providers, caching, provenance, and evidence sufficiency. Phase 5 has not
+started and requires separate explicit authorization.
 
 ## Continuing safety boundary
 

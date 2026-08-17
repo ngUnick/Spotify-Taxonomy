@@ -1,0 +1,45 @@
+schema_version: "2"
+specification_version: spec.vibe.romantic.v1
+logical_playlist_id: vibe.romantic
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings with convincing romantic, affectionate, desirous, intimate, sensual, or tender-love character through sonic or actively romantic lyrical framing.
+dimension_basis: subjective_character
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independently convincing romantic sonic character
+    match: all
+    conditions:
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [romantic]}
+    rationale: Romantic sonic or emotional character can establish the fit without lyrics.
+  - indicator_id: strong.002
+    summary: Actively affectionate, desirous, intimate, sensual, or tender-love framing
+    match: all
+    conditions:
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [affectionate_love, romantic_desire, romantic_intimacy, sensuality, tender_love]}
+    rationale: Lyrical qualification requires active romantic attachment or intimacy rather than relationship subject matter alone.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Warm intimacy and emotional closeness
+    match: any
+    conditions:
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [intimate]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [warm, poignant]}
+      - {characteristic_id: affect_mood.emotional_intensity, operator: at_least, values: [medium]}
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [romance]}
+    rationale: Intimacy, warmth, emotional closeness, and generic romance subject matter reinforce a fit but are not independently sufficient.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Explicitly non-romantic aggression or bleak detachment
+    match: any
+    conditions:
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [aggressive, bleak]}
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [aggression]}
+    rationale: Dominant conflicting character weakens Romantic suitability; heartbreak remains ambiguous rather than automatically excluded.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Heartbreak, breakup, failed-love, or troubled-relationship subject matter alone is insufficient; retain tragic or bittersweet love when active attachment or independently romantic sonic character remains clear.]
+version_guidance: [Covers, acoustic versions, and remixes are reassessed because intimacy and emotional meaning can change.]
+instrumental_vocal_guidance: [Instrumentals may qualify through independently convincing romantic sonic character; intimacy alone is supportive and love lyrics are not mandatory.]
+overlap_refs: [vibe.dark_sad_melancholic__vibe.emotional_nostalgic__vibe.romantic]

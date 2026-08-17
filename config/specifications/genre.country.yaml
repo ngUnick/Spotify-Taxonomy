@@ -1,0 +1,38 @@
+schema_version: "2"
+specification_version: spec.genre.country.v1
+logical_playlist_id: genre.country
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings grounded in Country tradition across traditional, contemporary, and hybrid forms.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent Country tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [country]}
+    rationale: Country lineage is required; acoustic instrumentation or storytelling alone is insufficient.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Country-associated acoustic and narrative traits
+    match: any
+    conditions:
+      - {characteristic_id: arrangement.instrumentation, operator: contains_any, values: [acoustic_strings, guitar_band]}
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [storytelling, heartbreak, nostalgia]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [organic]}
+    rationale: These reinforce, but do not replace, researched Country tradition evidence.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Acoustic Folk evidence without Country lineage
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [country]}
+      - {characteristic_id: style.traditions, operator: contains_any, values: [folk]}
+    rationale: Folk and Country may overlap, but neither is automatically inferred from the other.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Country-Pop and Country-Rock hybrids may receive several genres when their traditions are independently supported.]
+version_guidance: [Covers and crossover remixes are assessed by performed style; acoustic or live format alone does not create Country eligibility.]
+instrumental_vocal_guidance: [Instrumental Country is eligible through tradition evidence; storytelling vocals are common but optional.]
+overlap_refs: [genre.folk_acoustic__genre.country]

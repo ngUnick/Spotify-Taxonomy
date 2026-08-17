@@ -1,0 +1,56 @@
+schema_version: "2"
+specification_version: spec.vibe.dreamy_atmospheric.v1
+logical_playlist_id: vibe.dreamy_atmospheric
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings whose ethereal, hazy, dreamlike, softly diffused, or conditionally spacious and immersive atmosphere is the primary experience.
+dimension_basis: subjective_character
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Prominent ethereal or hazy atmosphere
+    match: all
+    conditions:
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_least, values: [high]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [ethereal, hazy]}
+    rationale: Clearly ethereal or hazy atmosphere can establish the fit when atmosphere is a primary feature.
+  - indicator_id: strong.002
+    summary: Spacious or immersive atmosphere with explicitly dreamy affect
+    match: all
+    conditions:
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_least, values: [high]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [spacious, immersive]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [dreamy]}
+    rationale: Spaciousness or immersion becomes defining only when independent affect evidence confirms a genuinely dreamlike experience.
+  - indicator_id: strong.003
+    summary: Spacious or immersive atmosphere with open soft diffusion
+    match: all
+    conditions:
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_least, values: [high]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [spacious, immersive]}
+      - {characteristic_id: atmosphere_space.spatial_openness, operator: at_least, values: [high]}
+      - {characteristic_id: energy_dynamics.transient_force, operator: at_most, values: [medium]}
+    rationale: Open, softly impacting spatial immersion may qualify when atmosphere rather than cinematic force remains primary.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Open space, dreamy affect, or low transient force
+    match: any
+    conditions:
+      - {characteristic_id: atmosphere_space.spatial_openness, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [dreamy, mysterious]}
+      - {characteristic_id: energy_dynamics.transient_force, operator: at_most, values: [medium]}
+    rationale: These reinforce dreamlike immersion but cannot make generic cinematic scale or spatial production sufficient.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Dry, cramped, or aggressively foregrounded presentation
+    match: any
+    conditions:
+      - {characteristic_id: atmosphere_space.spatial_openness, operator: at_most, values: [low]}
+      - {characteristic_id: energy_dynamics.transient_force, operator: at_least, values: [very_high]}
+    rationale: Strongly foregrounded impact can conflict unless atmospheric evidence remains dominant.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Dreamy does not require calm, sadness, low energy, or instrumental form; spacious or immersive production without dreamlike affect or soft open diffusion is insufficient.]
+version_guidance: [Remixes and alternate mixes are assessed independently because spatial and atmospheric prominence may change.]
+instrumental_vocal_guidance: [Both vocal and instrumental recordings qualify; reverberant vocals may contribute to atmosphere without being required.]
+overlap_refs: [vibe.chill__vibe.dreamy_atmospheric, activity.night_driving__activity.gaming__vibe.dreamy_atmospheric, activity.night_driving__vibe.chill__vibe.dark_sad_melancholic__vibe.dreamy_atmospheric, activity.gaming__activity.coding_focus__vibe.hype__vibe.dreamy_atmospheric, activity.sleeping__activity.background_music__vibe.chill__vibe.dreamy_atmospheric]

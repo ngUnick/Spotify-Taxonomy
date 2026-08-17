@@ -1,0 +1,38 @@
+schema_version: "2"
+specification_version: spec.genre.metal.v1
+logical_playlist_id: genre.metal
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings grounded in Metal tradition while preserving softer, atmospheric, and hybrid Metal variants.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent Metal tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [metal]}
+    rationale: Recognized Metal lineage is required; heaviness alone is insufficient.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Heavy force, distortion, or extreme vocals
+    match: any
+    conditions:
+      - {characteristic_id: timbre_production.distortion, operator: at_least, values: [high]}
+      - {characteristic_id: energy_dynamics.intensity, operator: at_least, values: [high]}
+      - {characteristic_id: vocals_lyrics.vocal_style, operator: contains_any, values: [screamed_growled]}
+    rationale: These are common supporting traits but are not universal or exclusive to Metal.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Forceful sound without Metal evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [metal]}
+      - {characteristic_id: energy_dynamics.intensity, operator: at_least, values: [high]}
+    rationale: High intensity in Rock, Electronic, or other traditions does not itself establish Metal.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [For Hard Rock and Metal boundaries, allow both only when independent sources support both traditions; preserve disagreement for review.]
+version_guidance: [Acoustic, orchestral, live, and remix versions require their own stylistic assessment rather than inheriting Metal automatically.]
+instrumental_vocal_guidance: [Instrumental and clean-vocal Metal are eligible; extreme vocals are supporting rather than mandatory.]
+overlap_refs: []

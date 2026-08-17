@@ -1,0 +1,45 @@
+schema_version: "2"
+specification_version: spec.genre.reggae_ska.v1
+logical_playlist_id: genre.reggae_ska
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings grounded in Reggae or Ska traditions as one broad category while allowing dub, punk, Pop, and electronic hybrids.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent Reggae or Ska tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [reggae, ska]}
+    rationale: Recognized tradition is primary; an offbeat rhythm alone is not sufficient.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Reggae or dub groove, bass, and rhythmic support
+    match: any
+    conditions:
+      - {characteristic_id: tempo_rhythm.groove, operator: contains_any, values: [dancehall_offbeat]}
+      - {characteristic_id: timbre_production.bass_weight, operator: at_least, values: [high]}
+      - {characteristic_id: tempo_rhythm.rhythmic_drive, operator: at_least, values: [medium]}
+    rationale: These reinforce Reggae or dub evidence but are shared with adjacent styles.
+  - indicator_id: supporting.002
+    summary: Ska-oriented brisk propulsion or brass-led ensemble support
+    match: any
+    conditions:
+      - {characteristic_id: tempo_rhythm.perceived_speed, operator: at_least, values: [high]}
+      - {characteristic_id: arrangement.instrumentation, operator: contains_any, values: [brass_led]}
+    rationale: Brisk propulsion and brass-led ensemble character can reinforce Ska evidence but never establish the genre without independent Ska tradition evidence.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Offbeat groove without Reggae or Ska tradition
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [reggae, ska]}
+      - {characteristic_id: tempo_rhythm.groove, operator: contains_any, values: [dancehall_offbeat]}
+    rationale: Rhythmic borrowing is not automatically genre membership.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Allow Reggae-Pop, Ska-Punk, dub, and electronic hybrids to overlap other broad genres when supported.]
+version_guidance: [Dub remixes and radically rearranged covers require independent assessment; remasters and edits normally preserve genre.]
+instrumental_vocal_guidance: [Instrumental Reggae, Ska, and dub are eligible; vocal style is not required.]
+overlap_refs: []

@@ -1,0 +1,40 @@
+schema_version: "2"
+specification_version: spec.vibe.emotional_nostalgic.v1
+logical_playlist_id: vibe.emotional_nostalgic
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect poignant, memory-laden, nostalgic, or strongly affecting recordings of positive, negative, or mixed valence.
+dimension_basis: subjective_character
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Strong poignancy, nostalgia, or emotional resonance
+    match: any
+    conditions:
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [poignant, nostalgic]}
+      - {characteristic_id: affect_mood.emotional_intensity, operator: at_least, values: [high]}
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [nostalgia, grief]}
+    rationale: Sonic intensity or thematic evidence may independently establish this Vibe while preserving provenance.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Intimate, warm, melancholic, or memory-oriented character
+    match: any
+    conditions:
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [intimate, hazy]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [warm, melancholic]}
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [heartbreak, storytelling]}
+    rationale: These support emotional resonance without requiring negative valence.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Emotionally neutral or purely functional presentation
+    match: all
+    conditions:
+      - {characteristic_id: affect_mood.emotional_intensity, operator: at_most, values: [low]}
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_most, values: [low]}
+    rationale: Low emotional salience weakens this Vibe even when a song is old or familiar.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Do not infer nostalgia from release age or personal familiarity; preserve lyrical/sonic conflict for review.]
+version_guidance: [Live and acoustic versions may heighten emotional resonance and are assessed separately; remasters do not imply nostalgia.]
+instrumental_vocal_guidance: [Instrumentals may qualify through strong poignancy or nostalgic atmosphere; lyrics are optional.]
+overlap_refs: [vibe.dark_sad_melancholic__vibe.emotional_nostalgic, vibe.chill__vibe.emotional_nostalgic, vibe.dark_sad_melancholic__vibe.emotional_nostalgic__vibe.romantic]

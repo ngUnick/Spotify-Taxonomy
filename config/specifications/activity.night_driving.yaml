@@ -1,0 +1,59 @@
+schema_version: "2"
+specification_version: spec.activity.night_driving.v1
+logical_playlist_id: activity.night_driving
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings combining sustained forward motion with an explicitly nocturnal or conditionally convincing dark, futuristic, immersive, cinematic, or mysterious night-driving atmosphere.
+dimension_basis: functional_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Explicit nocturnal atmosphere with sustained engagement
+    match: all
+    conditions:
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [nocturnal]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+    rationale: A clearly night-time atmosphere establishes the direct route only when context-suitable motion is independently present.
+  - indicator_id: strong.002
+    summary: Dark or cinematic atmosphere with prominent open night-driving identity
+    match: all
+    conditions:
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [dark, futuristic, immersive, cinematic, mysterious]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_least, values: [high]}
+      - {characteristic_id: atmosphere_space.spatial_openness, operator: at_least, values: [high]}
+      - {characteristic_id: structure_attention.attention_demand, operator: at_most, values: [medium]}
+    rationale: Generic darkness or cinematic scale qualifies only when atmosphere is dominant, spatially convincing, and compatible with attentive driving.
+  - indicator_id: strong.003
+    summary: Dark or futuristic atmosphere with prominent compatible production
+    match: all
+    conditions:
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [dark, futuristic, immersive, cinematic, mysterious]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_least, values: [high]}
+      - {characteristic_id: timbre_production.bass_weight, operator: at_least, values: [medium]}
+      - {characteristic_id: structure_attention.attention_demand, operator: at_most, values: [medium]}
+    rationale: Compatible bass-led production can support a convincing night-driving identity when atmosphere is primary and cognitive demand stays manageable.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Stable pulse and atmospheric prominence
+    match: any
+    conditions:
+      - {characteristic_id: tempo_rhythm.rhythmic_stability, operator: at_least, values: [medium]}
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_least, values: [high]}
+      - {characteristic_id: timbre_production.bass_weight, operator: at_least, values: [medium]}
+    rationale: These reinforce immersion without limiting the playlist to Electronic music.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Bright daytime levity without nocturnal depth
+    match: all
+    conditions:
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [bright]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_none, values: [nocturnal, dark, futuristic, immersive]}
+    rationale: A purely bright daytime presentation weakens the intended context.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Dark, futuristic, immersive, cinematic, or mysterious character alone is insufficient; conditional routes need prominent atmosphere, compatible spatial or production evidence, manageable attention, and sustained motion.]
+version_guidance: [Alternate mixes and remixes must preserve both nocturnal atmosphere and momentum.]
+instrumental_vocal_guidance: [Vocals are permitted when they do not overwhelm the atmospheric driving context.]
+overlap_refs: [activity.driving__activity.night_driving__activity.road_trip, activity.night_driving__activity.gaming__vibe.dreamy_atmospheric, activity.night_driving__vibe.chill__vibe.dark_sad_melancholic__vibe.dreamy_atmospheric]

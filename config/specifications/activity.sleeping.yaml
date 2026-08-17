@@ -1,0 +1,49 @@
+schema_version: "2"
+specification_version: spec.activity.sleeping.v1
+logical_playlist_id: activity.sleeping
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings suited to settling and sleep through very low disruption, restrained activation, and predictable gentle continuity.
+dimension_basis: functional_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Very low sleep disruption risk and restrained energy
+    match: all
+    conditions:
+      - {characteristic_id: functional.sleep_disruption_risk, operator: at_most, values: [low]}
+      - {characteristic_id: energy_dynamics.energy_level, operator: at_most, values: [low]}
+    rationale: Sleep suitability depends on non-disruption rather than simply slow tempo or calm labeling.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Stable quiet structure and gentle atmosphere
+    match: any
+    conditions:
+      - {characteristic_id: structure_attention.abrupt_change_risk, operator: at_most, values: [very_low]}
+      - {characteristic_id: energy_dynamics.transient_force, operator: at_most, values: [very_low]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [spacious, hazy]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [serene]}
+    rationale: Predictability and gentle space support settling when disruption risk is already low.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Strong activation, emotional tension, force, or abrupt changes
+    match: any
+    conditions:
+      - {characteristic_id: affect_mood.arousal, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.emotional_intensity, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.tension, operator: at_least, values: [high]}
+      - {characteristic_id: energy_dynamics.transient_force, operator: at_least, values: [high]}
+      - {characteristic_id: structure_attention.abrupt_change_risk, operator: at_least, values: [high]}
+    rationale: Emotional activation, suspense, force, or abruptness can materially disrupt sleep even when energy remains low or other passages are calm.
+hard_exclusions:
+  - indicator_id: exclusion.001
+    summary: Explicit very high sleep disruption risk
+    match: all
+    conditions:
+      - {characteristic_id: functional.sleep_disruption_risk, operator: equals, values: [very_high]}
+    rationale: An explicit, evidenced very-high disruption assessment directly contradicts the activity purpose; missing evidence never triggers it.
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Calm, ambient, low-energy, or instrumental labels are insufficient when tension, high emotional intensity, abrupt transitions, or high disruption remain evidenced.]
+version_guidance: ["Exact versions matter: bonus tracks, live noise, remixes, and long dynamic builds require separate assessment."]
+instrumental_vocal_guidance: [Soft vocals may qualify if disruption remains low; instrumental form alone does not guarantee sleep suitability.]
+overlap_refs: [activity.sleeping__activity.background_music__vibe.chill__vibe.dreamy_atmospheric]

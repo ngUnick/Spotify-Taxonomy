@@ -1,0 +1,38 @@
+schema_version: "2"
+specification_version: spec.genre.jazz.v1
+logical_playlist_id: genre.jazz
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings grounded in Jazz traditions across ensemble, vocal, fusion, and experimental forms.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent Jazz tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [jazz]}
+    rationale: Documented Jazz lineage is primary and avoids reducing Jazz to instrumentation or swing alone.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Jazz-associated rhythmic or ensemble traits
+    match: any
+    conditions:
+      - {characteristic_id: tempo_rhythm.groove, operator: contains_any, values: [swing, syncopated]}
+      - {characteristic_id: arrangement.instrumentation, operator: contains_any, values: [brass_led, piano_led, chamber]}
+      - {characteristic_id: structure_attention.complexity, operator: at_least, values: [high]}
+    rationale: These are supporting traits, not a standalone Jazz definition.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Jazz-like timbre without Jazz tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [jazz]}
+      - {characteristic_id: tempo_rhythm.groove, operator: contains_any, values: [swing]}
+    rationale: Swing feel or brass instrumentation occurs in multiple traditions.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Jazz fusion may overlap Rock, Electronic, Classical, or regional traditions when each is independently evidenced.]
+version_guidance: [Live improvisational versions may materially change Jazz evidence and must be assessed as their own canonical recording.]
+instrumental_vocal_guidance: [Both instrumental and vocal Jazz qualify; vocal presence is not a boundary.]
+overlap_refs: []

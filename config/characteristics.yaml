@@ -1,0 +1,891 @@
+schema_version: "1"
+vocabulary_version: characteristics.v1
+status: reviewed
+
+families:
+  - {family_id: style, display_name: Style and tradition, description: Broad musical traditions supported by normalized independent evidence.}
+  - {family_id: work_context, display_name: Work context, description: The recording's documented compositional or media-work function.}
+  - {family_id: version, display_name: Version, description: Recording or release-version distinctions that can materially change suitability.}
+  - {family_id: arrangement, display_name: Arrangement, description: Instrumentation and acoustic or electronic arrangement character.}
+  - {family_id: vocals_lyrics, display_name: Vocals and lyrics, description: Vocal prominence and independently described lyrical themes.}
+  - {family_id: cultural_context, display_name: Cultural context, description: "Platform-neutral artist-project, music-scene, and regional-cultural associations kept separate from musical Genre qualification."}
+  - {family_id: tempo_rhythm, display_name: Tempo and rhythm, description: "Measured or perceived pace, groove, drive, and rhythmic continuity."}
+  - {family_id: energy_dynamics, display_name: Energy and dynamics, description: "Perceived energetic force, intensity, and dynamic behavior."}
+  - {family_id: timbre_production, display_name: Timbre and production, description: "Perceived density, brightness, distortion, bass, and percussion."}
+  - {family_id: affect_mood, display_name: Affect and mood, description: Subjective emotional qualities kept separate from playlist decisions.}
+  - {family_id: atmosphere_space, display_name: Atmosphere and space, description: Spatial and environmental character of the recording.}
+  - {family_id: structure_attention, display_name: Structure and attention, description: "Repetition, complexity, change, and cognitive demand."}
+  - {family_id: functional, display_name: Functional suitability, description: "Reusable context factors such as momentum, focus, movement, and fatigue risk."}
+
+characteristics:
+  - characteristic_id: style.traditions
+    family_id: style
+    display_name: Musical traditions
+    definition: Independently supported broad musical traditions present in the recording.
+    epistemic_role: normalized_fact
+    version_sensitivity: may_vary
+    value_schema:
+      type: multi_enum
+      allowed_values: &traditions
+        - {value: pop}
+        - {value: rock}
+        - {value: metal}
+        - {value: hip_hop}
+        - {value: electronic}
+        - {value: rhythm_and_blues}
+        - {value: soul}
+        - {value: jazz}
+        - {value: blues}
+        - {value: western_classical}
+        - {value: folk}
+        - {value: country}
+        - {value: reggae}
+        - {value: ska}
+        - {value: latin}
+        - {value: regional_traditional}
+    normalization:
+      aliases: {r&b: rhythm_and_blues, classical: western_classical, traditional: regional_traditional}
+    provenance_expectations: &all_evidence
+      evidence_required: true
+      allowed_evidence_kinds: [sourced_fact, community_tag, editorial_description, user_assertion]
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: work_context.function
+    family_id: work_context
+    display_name: Work function
+    definition: Documented relationship between the recording and a screen, stage, or game work.
+    epistemic_role: normalized_fact
+    version_sensitivity: version_defining
+    value_schema:
+      type: multi_enum
+      allowed_values:
+        - {value: standalone_song}
+        - {value: original_score}
+        - {value: incidental_music}
+        - {value: theme}
+        - {value: work_specific_song}
+        - {value: soundtrack_compilation_appearance}
+    normalization: {aliases: {score: original_score, theme_song: theme}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: version.kind
+    family_id: version
+    display_name: Version kind
+    definition: Explicit recording or release-version form.
+    epistemic_role: normalized_fact
+    version_sensitivity: version_defining
+    value_schema:
+      type: multi_enum
+      allowed_values:
+        - {value: original}
+        - {value: live}
+        - {value: acoustic}
+        - {value: remix}
+        - {value: edit}
+        - {value: extended}
+        - {value: remaster}
+        - {value: instrumental}
+        - {value: cover}
+        - {value: demo}
+        - {value: alternate}
+        - {value: clean}
+        - {value: explicit}
+    normalization: {aliases: {radio_edit: edit, remastered: remaster}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: arrangement.acoustic_electronic_balance
+    family_id: arrangement
+    display_name: Acoustic/electronic balance
+    definition: Dominant arrangement balance between acoustic and electronic sound generation.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema:
+      type: ordinal
+      allowed_values:
+        - {value: fully_acoustic, rank: 1}
+        - {value: mostly_acoustic, rank: 2}
+        - {value: balanced, rank: 3}
+        - {value: mostly_electronic, rank: 4}
+        - {value: fully_electronic, rank: 5}
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: arrangement.substantive_acoustic_idiom
+    family_id: arrangement
+    display_name: Substantive acoustic idiom
+    definition: Whether the exact recording is intentionally grounded in a substantive acoustic performance or songwriting idiom, supported by contextual performance and arrangement evidence rather than acoustic balance alone.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: {type: boolean}
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: arrangement.orchestral_character
+    family_id: arrangement
+    display_name: Orchestral character
+    definition: Degree to which orchestral writing and ensemble texture shape the recording.
+    epistemic_role: either
+    version_sensitivity: may_vary
+    value_schema: &five_level
+      type: ordinal
+      allowed_values:
+        - {value: very_low, rank: 1}
+        - {value: low, rank: 2}
+        - {value: medium, rank: 3}
+        - {value: high, rank: 4}
+        - {value: very_high, rank: 5}
+    normalization: {aliases: {none: very_low, dominant: very_high}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: arrangement.instrumentation
+    family_id: arrangement
+    display_name: Instrumentation profile
+    definition: Controlled high-level instrumentation and ensemble traits.
+    epistemic_role: either
+    version_sensitivity: may_vary
+    value_schema:
+      type: multi_enum
+      allowed_values:
+        - {value: guitar_band}
+        - {value: electronic_synthesis}
+        - {value: orchestral}
+        - {value: chamber}
+        - {value: solo_instrument}
+        - {value: piano_led}
+        - {value: acoustic_strings}
+        - {value: brass_led}
+        - {value: traditional_regional}
+        - {value: turntablism_samples}
+    normalization: {aliases: {synth: electronic_synthesis, orchestra: orchestral}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: vocals_lyrics.vocal_presence
+    family_id: vocals_lyrics
+    display_name: Vocal presence
+    definition: Functional prominence and lexical role of vocal material.
+    epistemic_role: either
+    version_sensitivity: may_vary
+    value_schema:
+      type: enum
+      allowed_values:
+        - {value: instrumental}
+        - {value: non_lexical}
+        - {value: sparse_samples}
+        - {value: background}
+        - {value: mixed}
+        - {value: prominent_lead}
+    normalization: {aliases: {no_vocals: instrumental, vocal_chops: sparse_samples}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: vocals_lyrics.vocal_style
+    family_id: vocals_lyrics
+    display_name: Vocal style
+    definition: Controlled performance styles used by audible vocals.
+    epistemic_role: either
+    version_sensitivity: may_vary
+    value_schema:
+      type: multi_enum
+      allowed_values:
+        - {value: sung}
+        - {value: rap}
+        - {value: spoken}
+        - {value: choral}
+        - {value: screamed_growled}
+        - {value: non_lexical}
+    normalization: {aliases: {spoken_word: spoken, growled: screamed_growled}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: vocals_lyrics.lyrical_language_profile
+    family_id: vocals_lyrics
+    display_name: Lyrical language profile
+    definition: Predominant Greek or non-Greek lexical-language balance in the exact recording, independent of artist identity or Genre qualification.
+    epistemic_role: either
+    version_sensitivity: version_defining
+    value_schema:
+      type: enum
+      allowed_values:
+        - {value: greek}
+        - {value: non_greek}
+        - {value: mixed_greek_dominant}
+        - {value: mixed_non_greek_dominant}
+        - {value: mixed_balanced}
+    normalization: {aliases: {greek_language: greek, other_language: non_greek}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: vocals_lyrics.themes
+    family_id: vocals_lyrics
+    display_name: Lyrical themes
+    definition: Independently supported lyrical or narrative themes without inferring them from a playlist.
+    epistemic_role: either
+    version_sensitivity: may_vary
+    value_schema:
+      type: multi_enum
+      allowed_values:
+        - {value: romance}
+        - {value: heartbreak}
+        - {value: nostalgia}
+        - {value: empowerment}
+        - {value: perseverance}
+        - {value: celebration}
+        - {value: grief}
+        - {value: social_commentary}
+        - {value: storytelling}
+        - {value: aggression}
+        - {value: escapism}
+        - {value: affectionate_love}
+        - {value: romantic_desire}
+        - {value: romantic_intimacy}
+        - {value: sensuality}
+        - {value: tender_love}
+    normalization: {aliases: {love: romance, loss: grief}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: cultural_context.primary_project_scene_association
+    family_id: cultural_context
+    display_name: Primary project or scene association
+    definition: Primary independently supported Greek or non-Greek cultural and music-scene association of the exact recording or creative project, not the nationality of every contributor.
+    epistemic_role: either
+    version_sensitivity: may_vary
+    value_schema:
+      type: enum
+      allowed_values:
+        - {value: greek}
+        - {value: non_greek}
+        - {value: mixed_or_ambiguous}
+    normalization: {aliases: {greek_led: greek, foreign_led: non_greek, multinational: mixed_or_ambiguous}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: cultural_context.regional_musical_association
+    family_id: cultural_context
+    display_name: Regional musical association
+    definition: Independently supported Greek or non-Greek regional-cultural association of the exact recording, kept separate from evidence that establishes any musical Genre.
+    epistemic_role: either
+    version_sensitivity: may_vary
+    value_schema:
+      type: enum
+      allowed_values:
+        - {value: greek}
+        - {value: non_greek}
+        - {value: mixed_or_ambiguous}
+    normalization: {aliases: {greek_regional: greek, foreign_regional: non_greek}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: tempo_rhythm.bpm
+    family_id: tempo_rhythm
+    display_name: Tempo
+    definition: Independently measured or reliably reported tempo in beats per minute.
+    epistemic_role: normalized_fact
+    version_sensitivity: may_vary
+    value_schema: {type: integer, minimum: 20, maximum: 300, step: 1, unit: bpm}
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: tempo_rhythm.perceived_speed
+    family_id: tempo_rhythm
+    display_name: Perceived speed
+    definition: Perceived pace accounting for half-time, double-time, and rhythmic feel.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: tempo_rhythm.rhythmic_stability
+    family_id: tempo_rhythm
+    display_name: Rhythmic stability
+    definition: Consistency of pulse and pacing across the recording.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {steady: very_high}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: tempo_rhythm.rhythmic_drive
+    family_id: tempo_rhythm
+    display_name: Rhythmic drive
+    definition: Perceived forward propulsion generated by rhythm.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: tempo_rhythm.groove
+    family_id: tempo_rhythm
+    display_name: Groove character
+    definition: Controlled rhythmic-feel categories supported by evidence or derivation.
+    epistemic_role: either
+    version_sensitivity: may_vary
+    value_schema:
+      type: multi_enum
+      allowed_values:
+        - {value: straight}
+        - {value: syncopated}
+        - {value: swing}
+        - {value: four_on_floor}
+        - {value: breakbeat}
+        - {value: halftime}
+        - {value: rubato_free}
+        - {value: waltz_triple}
+        - {value: dancehall_offbeat}
+        - {value: latin_clave}
+    normalization: {aliases: {four_to_the_floor: four_on_floor, free_time: rubato_free}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: tempo_rhythm.dance_impulse
+    family_id: tempo_rhythm
+    display_name: Dance impulse
+    definition: Strength of the recording's bodily dance invitation independent of a playlist decision.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: tempo_rhythm.momentum
+    family_id: tempo_rhythm
+    display_name: Rhythmic momentum
+    definition: Ability of the rhythmic design to sustain forward motion.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: energy_dynamics.energy_level
+    family_id: energy_dynamics
+    display_name: Energy level
+    definition: Overall perceived energetic activation of the recording.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: energy_dynamics.intensity
+    family_id: energy_dynamics
+    display_name: Intensity
+    definition: Perceived force and emotional or physical pressure.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: energy_dynamics.dynamic_variation
+    family_id: energy_dynamics
+    display_name: Dynamic variation
+    definition: Degree of loudness and intensity change across the recording.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: energy_dynamics.transient_force
+    family_id: energy_dynamics
+    display_name: Transient force
+    definition: Perceived sharpness and physical force of attacks and impacts.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: timbre_production.sonic_density
+    family_id: timbre_production
+    display_name: Sonic density
+    definition: Perceived fullness and simultaneous layering of the sound field.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {sparse: very_low, dense: very_high}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: timbre_production.brightness
+    family_id: timbre_production
+    display_name: Brightness
+    definition: Perceived emphasis of bright, crisp, or high-frequency timbre.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: timbre_production.distortion
+    family_id: timbre_production
+    display_name: Distortion
+    definition: Perceived saturation, clipping, or deliberately rough distorted texture.
+    epistemic_role: either
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {clean: very_low}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: timbre_production.bass_weight
+    family_id: timbre_production
+    display_name: Bass weight
+    definition: Perceived prominence and physical weight of low-frequency content.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: timbre_production.percussive_prominence
+    family_id: timbre_production
+    display_name: Percussive prominence
+    definition: Degree to which drums and percussive attacks dominate the arrangement.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: affect_mood.valence
+    family_id: affect_mood
+    display_name: Emotional valence
+    definition: Dominant positive, negative, or mixed emotional direction.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema:
+      type: ordinal
+      allowed_values:
+        - {value: very_negative, rank: 1}
+        - {value: negative, rank: 2}
+        - {value: mixed, rank: 3}
+        - {value: positive, rank: 4}
+        - {value: very_positive, rank: 5}
+    normalization: {aliases: {sad: negative, happy: positive}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: affect_mood.arousal
+    family_id: affect_mood
+    display_name: Emotional arousal
+    definition: Perceived emotional activation from subdued to highly activated.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: affect_mood.emotional_intensity
+    family_id: affect_mood
+    display_name: Emotional intensity
+    definition: Strength of the emotional impression regardless of valence.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: affect_mood.qualities
+    family_id: affect_mood
+    display_name: Mood qualities
+    definition: Controlled emotional qualities that may coexist or conflict.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema:
+      type: multi_enum
+      allowed_values:
+        - {value: joyful}
+        - {value: serene}
+        - {value: warm}
+        - {value: triumphant}
+        - {value: euphoric}
+        - {value: playful}
+        - {value: sad}
+        - {value: melancholic}
+        - {value: bleak}
+        - {value: ominous}
+        - {value: tense}
+        - {value: poignant}
+        - {value: nostalgic}
+        - {value: romantic}
+        - {value: aggressive}
+        - {value: determined}
+        - {value: dreamy}
+        - {value: mysterious}
+        - {value: expansive}
+        - {value: exhilarating}
+    normalization: {aliases: {melancholy: melancholic, nostalgia: nostalgic}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: affect_mood.positive_elevation
+    family_id: affect_mood
+    display_name: Positive elevation
+    definition: Degree to which the recording raises or lightens mood.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: affect_mood.relaxation
+    family_id: affect_mood
+    display_name: Relaxed low-pressure character
+    definition: Degree to which the recording feels unhurried, comfortable to sit with, and free of perceptual pressure or agitation.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: affect_mood.tension
+    family_id: affect_mood
+    display_name: Emotional tension
+    definition: Degree of suspense, unease, agitation, or unresolved emotional pressure in the recording.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: affect_mood.determination
+    family_id: affect_mood
+    display_name: Determination
+    definition: Perceived resolve, purpose, perseverance, and forward intent.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: atmosphere_space.qualities
+    family_id: atmosphere_space
+    display_name: Atmospheric qualities
+    definition: Controlled environmental and spatial impressions.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema:
+      type: multi_enum
+      allowed_values:
+        - {value: intimate}
+        - {value: spacious}
+        - {value: ethereal}
+        - {value: cinematic}
+        - {value: nocturnal}
+        - {value: organic}
+        - {value: futuristic}
+        - {value: hazy}
+        - {value: mysterious}
+        - {value: bright}
+        - {value: dark}
+        - {value: immersive}
+    normalization: {aliases: {nighttime: nocturnal, airy: spacious}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: atmosphere_space.spatial_openness
+    family_id: atmosphere_space
+    display_name: Spatial openness
+    definition: Perceived breadth and openness of the sound field.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: atmosphere_space.atmospheric_prominence
+    family_id: atmosphere_space
+    display_name: Atmospheric prominence
+    definition: Degree to which atmosphere is a primary rather than incidental feature.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: structure_attention.repetition
+    family_id: structure_attention
+    display_name: Repetition
+    definition: Degree of recurring musical material and predictable cyclic structure.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: structure_attention.complexity
+    family_id: structure_attention
+    display_name: Structural complexity
+    definition: Perceived compositional and structural complexity.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: structure_attention.attention_demand
+    family_id: structure_attention
+    display_name: Attention demand
+    definition: Degree to which the recording pulls deliberate cognitive attention.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: structure_attention.distraction_risk
+    family_id: structure_attention
+    display_name: Distraction risk
+    definition: Likelihood that salience, lyrics, or changes interrupt a concurrent task.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: structure_attention.abrupt_change_risk
+    family_id: structure_attention
+    display_name: Abrupt-change risk
+    definition: Likelihood of sudden disruptive changes in loudness, texture, or pacing.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.sustained_momentum
+    family_id: functional
+    display_name: Sustained momentum
+    definition: Ability to maintain forward engagement without extended loss of motion.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.background_compatibility
+    family_id: functional
+    display_name: Background compatibility
+    definition: Suitability for unobtrusive concurrent listening without implying playlist membership.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.social_activation
+    family_id: functional
+    display_name: Social activation
+    definition: Capacity to energize shared or group activity.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.personal_activation
+    family_id: functional
+    display_name: Personal activation
+    definition: Capacity to energize individual effort, competition, psych-up, or determined action without requiring a group context.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.interactive_engagement
+    family_id: functional
+    display_name: Interactive engagement
+    definition: Capacity to support sustained attention and responsive participation in an interactive activity without prescribing a specific use case.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.communal_participation
+    family_id: functional
+    display_name: Communal participation
+    definition: Capacity to invite active shared singing, call-and-response, coordinated participation, or collective celebration beyond passive shared listening.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.movement_support
+    family_id: functional
+    display_name: Movement support
+    definition: Degree to which pulse and energy support bodily movement.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.exercise_activation
+    family_id: functional
+    display_name: Exercise activation
+    definition: Capacity to support physically demanding effort through drive and intensity.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.focus_support
+    family_id: functional
+    display_name: Focus support
+    definition: Capacity to sustain task attention without excessive distraction.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.fatigue_risk
+    family_id: functional
+    display_name: Fatigue risk
+    definition: Likelihood of sustained intensity or abrasiveness causing listening fatigue.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.sleep_disruption_risk
+    family_id: functional
+    display_name: Sleep disruption risk
+    definition: Likelihood that energy, transients, vocals, or changes disrupt settling or sleep.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.pacing_compatibility
+    family_id: functional
+    display_name: Pacing compatibility
+    definition: Suitability of pulse and continuity for sustained regular physical pacing.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions
+
+  - characteristic_id: functional.travel_endurance
+    family_id: functional
+    display_name: Travel endurance
+    definition: Capacity to remain engaging and comfortable during extended travel listening.
+    epistemic_role: derived_judgment
+    version_sensitivity: may_vary
+    value_schema: *five_level
+    normalization: {aliases: {}}
+    provenance_expectations: *all_evidence
+    missing_semantics: absent_means_unknown
+    contradiction_policy: preserve_assertions

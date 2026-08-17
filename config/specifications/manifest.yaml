@@ -1,0 +1,47 @@
+schema_version: "1"
+specification_set_version: specifications.v1
+taxonomy_version: taxonomy.v1
+characteristic_vocabulary_version: characteristics.v1
+output_target_set_version: output-targets.v1
+genre_variant_routing_policy_version: genre-variant-routing.v1
+status: reviewed
+overlap_path: specifications/overlaps.yaml
+output_targets_path: output-targets.yaml
+genre_variant_routing_path: genre-variant-routing.yaml
+specifications:
+  - {logical_playlist_id: genre.pop, path: specifications/genre.pop.yaml}
+  - {logical_playlist_id: genre.rock, path: specifications/genre.rock.yaml}
+  - {logical_playlist_id: genre.metal, path: specifications/genre.metal.yaml}
+  - {logical_playlist_id: genre.hip_hop_rap, path: specifications/genre.hip_hop_rap.yaml}
+  - {logical_playlist_id: genre.electronic, path: specifications/genre.electronic.yaml}
+  - {logical_playlist_id: genre.rnb_soul, path: specifications/genre.rnb_soul.yaml}
+  - {logical_playlist_id: genre.jazz, path: specifications/genre.jazz.yaml}
+  - {logical_playlist_id: genre.blues, path: specifications/genre.blues.yaml}
+  - {logical_playlist_id: genre.classical, path: specifications/genre.classical.yaml}
+  - {logical_playlist_id: genre.folk_acoustic, path: specifications/genre.folk_acoustic.yaml}
+  - {logical_playlist_id: genre.country, path: specifications/genre.country.yaml}
+  - {logical_playlist_id: genre.reggae_ska, path: specifications/genre.reggae_ska.yaml}
+  - {logical_playlist_id: genre.latin, path: specifications/genre.latin.yaml}
+  - {logical_playlist_id: genre.world_traditional, path: specifications/genre.world_traditional.yaml}
+  - {logical_playlist_id: genre.soundtracks_scores, path: specifications/genre.soundtracks_scores.yaml}
+  - {logical_playlist_id: vibe.chill, path: specifications/vibe.chill.yaml}
+  - {logical_playlist_id: vibe.chill_instrumental, path: specifications/vibe.chill_instrumental.yaml}
+  - {logical_playlist_id: vibe.uplifting_feel_good, path: specifications/vibe.uplifting_feel_good.yaml}
+  - {logical_playlist_id: vibe.euphoric_energetic, path: specifications/vibe.euphoric_energetic.yaml}
+  - {logical_playlist_id: vibe.hype, path: specifications/vibe.hype.yaml}
+  - {logical_playlist_id: vibe.motivational, path: specifications/vibe.motivational.yaml}
+  - {logical_playlist_id: vibe.dark_sad_melancholic, path: specifications/vibe.dark_sad_melancholic.yaml}
+  - {logical_playlist_id: vibe.emotional_nostalgic, path: specifications/vibe.emotional_nostalgic.yaml}
+  - {logical_playlist_id: vibe.dreamy_atmospheric, path: specifications/vibe.dreamy_atmospheric.yaml}
+  - {logical_playlist_id: vibe.romantic, path: specifications/vibe.romantic.yaml}
+  - {logical_playlist_id: activity.driving, path: specifications/activity.driving.yaml}
+  - {logical_playlist_id: activity.night_driving, path: specifications/activity.night_driving.yaml}
+  - {logical_playlist_id: activity.gym, path: specifications/activity.gym.yaml}
+  - {logical_playlist_id: activity.running, path: specifications/activity.running.yaml}
+  - {logical_playlist_id: activity.studying, path: specifications/activity.studying.yaml}
+  - {logical_playlist_id: activity.coding_focus, path: specifications/activity.coding_focus.yaml}
+  - {logical_playlist_id: activity.gaming, path: specifications/activity.gaming.yaml}
+  - {logical_playlist_id: activity.background_music, path: specifications/activity.background_music.yaml}
+  - {logical_playlist_id: activity.sleeping, path: specifications/activity.sleeping.yaml}
+  - {logical_playlist_id: activity.party, path: specifications/activity.party.yaml}
+  - {logical_playlist_id: activity.road_trip, path: specifications/activity.road_trip.yaml}

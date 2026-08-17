@@ -1,0 +1,39 @@
+schema_version: "2"
+specification_version: spec.activity.coding_focus.v1
+logical_playlist_id: activity.coding_focus
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings that support sustained coding or focused task flow, including more rhythmic or electronic momentum than Studying may tolerate.
+dimension_basis: functional_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Strong focus support with sustainable momentum
+    match: all
+    conditions:
+      - {characteristic_id: functional.focus_support, operator: at_least, values: [high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+    rationale: Coding/Focus combines task support with continuity rather than demanding minimal energy.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Repetitive stable pulse and manageable complexity
+    match: any
+    conditions:
+      - {characteristic_id: structure_attention.repetition, operator: at_least, values: [medium]}
+      - {characteristic_id: tempo_rhythm.rhythmic_stability, operator: at_least, values: [high]}
+      - {characteristic_id: structure_attention.complexity, operator: between, values: [low, medium]}
+    rationale: Predictable momentum may support flow even at moderate energy.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Prominent lyrics or disruptive changes
+    match: any
+    conditions:
+      - {characteristic_id: vocals_lyrics.vocal_presence, operator: one_of, values: [prominent_lead]}
+      - {characteristic_id: structure_attention.abrupt_change_risk, operator: at_least, values: [high]}
+    rationale: These are negative evidence, not universal exclusions, under the approved vocal tolerance.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Coding/Focus is evaluated independently from Background Music and may favor stronger repetitive drive than Studying.]
+version_guidance: [Extended versions may improve flow; live or vocal remixes require independent distraction assessment.]
+instrumental_vocal_guidance: [Allow low-distraction vocals; prominent ordinary lyrical vocals usually count negatively but do not automatically exclude.]
+overlap_refs: [activity.studying__activity.coding_focus__activity.background_music, activity.gaming__activity.coding_focus__vibe.hype__vibe.dreamy_atmospheric]

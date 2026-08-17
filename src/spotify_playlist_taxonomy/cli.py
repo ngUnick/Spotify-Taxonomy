@@ -23,9 +23,10 @@ from spotify_playlist_taxonomy.adapters.spotify import (
 )
 from spotify_playlist_taxonomy.config import (
     ApplicationConfig,
+    Phase4ValidationError,
     TaxonomyDocument,
     load_application_config,
-    load_specification_document,
+    load_phase4_bundle,
     load_taxonomy_document,
     resolve_taxonomy_path,
     taxonomy_digest,
@@ -224,21 +225,21 @@ def root(
 @config_app.command("validate")
 def validate_config(
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
-    specification: list[Path] | None = typer.Option(None, "--specification"),
 ) -> None:
-    """Validate configuration without creating runtime state."""
+    """Validate the complete source-controlled taxonomy bundle without runtime state."""
     try:
-        _, taxonomy, taxonomy_path = _load_documents(config_path)
-        logical_ids = {item.logical_id for item in taxonomy.playlists}
-        for path in specification or []:
-            document = load_specification_document(path)
-            if document.logical_playlist_id not in logical_ids:
-                raise ValueError(f"{path} references an unknown logical playlist")
+        bundle = load_phase4_bundle(config_path)
+        taxonomy = bundle.taxonomy
         typer.echo(
             f"Valid: taxonomy={taxonomy.taxonomy_version} playlists={len(taxonomy.playlists)} "
-            f"digest={taxonomy_digest(taxonomy)} source={taxonomy_path}"
+            f"characteristics={len(bundle.vocabulary.characteristics)} "
+            f"specifications={len(bundle.specifications)} "
+            f"output_targets={len(bundle.output_targets.targets)} "
+            f"routing={bundle.genre_variant_routing.routing_policy_version} "
+            f"status={bundle.manifest.status.value} "
+            f"digest={bundle.digest} source={bundle.taxonomy_path}"
         )
-    except (OSError, ValueError, ValidationError) as error:
+    except (OSError, ValueError, ValidationError, Phase4ValidationError) as error:
         _fail(error)
 
 

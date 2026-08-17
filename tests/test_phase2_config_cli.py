@@ -17,6 +17,16 @@ CONFIG = ROOT / "config" / "application.yaml"
 RUNNER = CliRunner()
 
 
+def application_payload(**extra: object) -> dict[str, object]:
+    return {
+        "schema_version": "3",
+        "taxonomy_path": "taxonomy.yaml",
+        "characteristic_vocabulary_path": "characteristics.yaml",
+        "specification_manifest_path": "specifications/manifest.yaml",
+        **extra,
+    }
+
+
 class _ContextClient:
     def __enter__(self):
         return self
@@ -60,40 +70,30 @@ class Phase2ConfigurationCliTests(unittest.TestCase):
         ):
             return RUNNER.invoke(app, arguments)
 
-    def test_config_v2_defaults_and_bounds(self) -> None:
-        config = ApplicationConfig.model_validate({
-            "schema_version": "2", "taxonomy_path": "taxonomy.yaml"
-        })
+    def test_config_v3_defaults_and_bounds(self) -> None:
+        config = ApplicationConfig.model_validate(application_payload())
         self.assertEqual(20, config.spotify.request_timeout_seconds)
         self.assertEqual(3, config.spotify.max_read_attempts)
         self.assertEqual(300, config.spotify.callback_timeout_seconds)
         self.assertEqual(8888, config.spotify.callback_port)
-        configured = ApplicationConfig.model_validate({
-            "schema_version": "2",
-            "taxonomy_path": "taxonomy.yaml",
-            "spotify": {"callback_port": 9443},
-        })
+        configured = ApplicationConfig.model_validate(
+            application_payload(spotify={"callback_port": 9443})
+        )
         self.assertEqual(9443, configured.spotify.callback_port)
         with self.assertRaises(ValidationError):
-            ApplicationConfig.model_validate({
-                "schema_version": "2",
-                "taxonomy_path": "taxonomy.yaml",
-                "spotify": {"max_read_attempts": 11},
-            })
+            ApplicationConfig.model_validate(
+                application_payload(spotify={"max_read_attempts": 11})
+            )
         for invalid in (0, 1023, 65536, True, "8888"):
             with self.subTest(callback_port=invalid), self.assertRaises(ValidationError):
-                ApplicationConfig.model_validate({
-                    "schema_version": "2",
-                    "taxonomy_path": "taxonomy.yaml",
-                    "spotify": {"callback_port": invalid},
-                })
+                ApplicationConfig.model_validate(
+                    application_payload(spotify={"callback_port": invalid})
+                )
 
     def test_login_callback_port_cli_override_precedence(self) -> None:
-        configured = ApplicationConfig.model_validate({
-            "schema_version": "2",
-            "taxonomy_path": "taxonomy.yaml",
-            "spotify": {"callback_port": 9443},
-        })
+        configured = ApplicationConfig.model_validate(
+            application_payload(spotify={"callback_port": 9443})
+        )
         with patch.dict("os.environ", {"SPOTIFY_CLIENT_ID": "synthetic-client-id"}), patch(
             "spotify_playlist_taxonomy.cli._load_documents",
             return_value=(configured, object(), Path("synthetic-taxonomy.yaml")),
@@ -128,9 +128,7 @@ class Phase2ConfigurationCliTests(unittest.TestCase):
     def test_secret_and_client_id_fields_remain_forbidden(self) -> None:
         for field in ("client_secret", "client_id", "refresh_token"):
             with self.subTest(field=field), self.assertRaises(ValidationError):
-                ApplicationConfig.model_validate({
-                    "schema_version": "2", "taxonomy_path": "taxonomy.yaml", field: "synthetic"
-                })
+                ApplicationConfig.model_validate(application_payload(**{field: "synthetic"}))
 
     def test_spotify_help_is_local(self) -> None:
         result = RUNNER.invoke(app, ["spotify", "--help"])

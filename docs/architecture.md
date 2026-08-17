@@ -1,8 +1,8 @@
 # Phase 0 architecture
 
-Status: Phase 3 complete, 2026-08-16. Phase 0 boundaries remain authoritative. The read-only Phase 3
-workflow has been validated against one playlist SOURCE, the singleton Saved Tracks/Liked Songs INBOX,
-and one explicitly selected playlist-backed Shazam INBOX. Phase 4 has not started.
+Status: Phases 0 through 4 complete, 2026-08-17. Phase 0 boundaries remain authoritative. The Phase 4
+source bundle is explicitly human-reviewed. Phase 5 has not started, and Phase 4 introduced no research,
+classification execution, runtime synchronization, or Spotify access.
 
 ## Design principles
 
@@ -118,6 +118,29 @@ SQLite is the V1 store under the resolved per-user runtime root. Phase 1 persist
 concepts only: taxonomy revisions, catalogue identities/mappings, match assessments, playlist registrations,
 evidence, characteristics, proposals, decisions, and calibration selections. Workflow-owned research jobs,
 classification batches, desired assignments, sync plans, and operation journals remain deferred.
+
+## Phase 4 source bundle
+
+`config/application.yaml` points to the taxonomy, controlled characteristic vocabulary, and specification
+manifest. The manifest maps every stable logical playlist ID to one specification and to centralized overlap
+guidance, and references the output-target registry and Genre variant-routing policy. `config validate`
+resolves only source-controlled relative paths, validates each document with a strict schema, verifies all
+characteristic/operator/value and overlap references, preserves the exact 36-to-36 semantic mapping,
+enforces 51 concrete targets, and calculates a deterministic digest over normalized documents.
+
+Genre routing is downstream of semantic Genre qualification. It is language-dominant for lexical vocals,
+uses regional then primary project/scene evidence for instrumental/non-lexical recordings, and remains
+unresolved when evidence is balanced, missing, or genuinely ambiguous. Routing is exact-version-sensitive;
+it never creates Genre evidence or forces a single Genre.
+
+The Genre specification basis is normally `musical_style`. Soundtracks/Scores is the explicit exception:
+its `work_context` basis represents documented creation or function for a screen, stage, game, or comparable
+work. That exception does not make soundtrack appearance sufficient and does not change independent
+style-based Genre overlap.
+
+The bundle is upstream policy input. It contains no track assignments, provider analytical features,
+runtime account state, or mutation authority. Loading or validating it does not open SQLite, instantiate a
+Spotify reader, contact a provider, or persist a specification version.
 
 ## Batch and state boundaries
 

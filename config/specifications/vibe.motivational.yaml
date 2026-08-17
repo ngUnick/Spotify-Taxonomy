@@ -1,0 +1,39 @@
+schema_version: "2"
+specification_version: spec.vibe.motivational.v1
+logical_playlist_id: vibe.motivational
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings that convey purpose, resolve, perseverance, empowerment, or forward drive through sonic character or lyrical theme.
+dimension_basis: subjective_character
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Strong determination or explicit perseverance theme
+    match: any
+    conditions:
+      - {characteristic_id: affect_mood.determination, operator: at_least, values: [high]}
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [empowerment, perseverance]}
+    rationale: Approved policy permits either sonic determination or independently evidenced lyrical purpose.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Sustained forward momentum and triumphant character
+    match: any
+    conditions:
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [determined, triumphant]}
+      - {characteristic_id: tempo_rhythm.rhythmic_drive, operator: at_least, values: [high]}
+    rationale: These reinforce purposeful motion without turning Motivational into an energy tier.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Resignation or strongly aimless stasis
+    match: all
+    conditions:
+      - {characteristic_id: affect_mood.determination, operator: at_most, values: [low]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_most, values: [low]}
+    rationale: Lack of resolve and motion weakens motivational suitability unless lyrics provide contrary evidence.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [When lyrics and sonic character materially conflict, preserve both assertions and require review rather than choosing silently.]
+version_guidance: [Instrumental, acoustic, live, and remix versions are assessed independently when resolve or forward drive changes.]
+instrumental_vocal_guidance: [Instrumentals may qualify through strong determined character; lyrics are an alternative evidence path, not a requirement.]
+overlap_refs: [vibe.uplifting_feel_good__vibe.euphoric_energetic__vibe.hype__vibe.motivational]

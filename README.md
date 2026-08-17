@@ -1,8 +1,9 @@
 # Spotify Playlist Taxonomy
 
-Phases 0 through 3 are complete. The repository contains the safety architecture, local SQLite foundation,
-Spotify PKCE/read-only adapter, and the live-validated SOURCE/INBOX ingestion and canonical-matching
-workflow. Phase 4 has not started.
+Phases 0 through 4 are complete. Phase 4 provides an explicitly human-reviewed, source-controlled
+58-characteristic vocabulary, one reviewed specification for each of the 36 stable semantic playlists,
+centralized overlap guidance, 51 stable future output targets, an approved Greek/Foreign Genre routing
+policy, and strict offline cross-document validation. Phase 5 is next and has not started.
 
 The completed Phase 3 runtime has one playlist SOURCE publication (48 occurrences), the singleton Saved
 Tracks/Liked Songs INBOX publication (506 occurrences), and one explicitly selected playlist-backed Shazam
@@ -17,8 +18,13 @@ adoption links, candidates, interventions, and decision history are account-scop
 only `/playlists/{id}/items` and canonical nested `item`; the legacy nested-`track` fallback was removed after
 live validation. Spotify remained read-only throughout Phase 3. No modify scope or Spotify writer exists.
 
-The project does **not** yet run research/classification, finalize desired state, create synchronization
-plans, or modify Spotify.
+The Phase 4 documents define classification inputs only. They do **not** execute characteristic derivation,
+assign tracks, run research/classification, synchronize definitions into SQLite, finalize desired state,
+create synchronization plans, or modify Spotify.
+
+The 15 Genre meanings remain unsplit. Each independently approved Genre membership will later route to a
+Greek or Foreign output target using exact-recording language and cultural-context evidence. Foreign means
+all non-Greek languages and contexts, not only English; unresolved routing remains reviewable.
 
 ## Setup and validation
 
@@ -100,6 +106,8 @@ unversioned taxonomy changes fail rather than silently rewriting state.
 - `docs/data-governance.md` — retention, privacy, and provenance.
 - `docs/safety-model.md` — playlist roles and guarded mutation design.
 - `docs/classification-design.md` — evidence, characteristics, proposals, and review.
+- `docs/characteristic-vocabulary.md` — controlled characteristic families and evidence semantics.
+- `docs/taxonomy-specifications.md` — reviewed specifications, overlaps, and semantic/output boundaries.
 - `docs/spotify-policy-baseline.md` — dated Spotify API/policy risk record.
 - `docs/spotify-setup.md` — least-privilege dashboard, PKCE, credential, and revocation guidance.
 - `docs/project-handoff.md` — current completion baseline, limitations, and next authorized boundary.

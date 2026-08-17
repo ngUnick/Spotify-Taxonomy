@@ -1,0 +1,47 @@
+schema_version: "2"
+specification_version: spec.activity.party.v1
+logical_playlist_id: activity.party
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings that support shared celebration, dancing, participation, or sustained social energy.
+dimension_basis: functional_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Strong social activation with dance or movement support
+    match: all
+    conditions:
+      - {characteristic_id: functional.social_activation, operator: at_least, values: [high]}
+      - {characteristic_id: tempo_rhythm.dance_impulse, operator: at_least, values: [medium]}
+    rationale: Party is a social function, not merely a high-energy Vibe.
+  - indicator_id: strong.002
+    summary: Strong communal participation without mandatory dancing
+    match: all
+    conditions:
+      - {characteristic_id: functional.social_activation, operator: at_least, values: [very_high]}
+      - {characteristic_id: functional.communal_participation, operator: at_least, values: [high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+    rationale: Singalong, call-and-response, or collective celebration can establish Party function when participation and group engagement are unusually strong.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Celebration, strong groove, or sustained energetic momentum
+    match: any
+    conditions:
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [celebration]}
+      - {characteristic_id: tempo_rhythm.rhythmic_drive, operator: at_least, values: [high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [high]}
+    rationale: Several musical routes can support group participation across genres.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Low social activation and weak movement support
+    match: all
+    conditions:
+      - {characteristic_id: functional.social_activation, operator: at_most, values: [low]}
+      - {characteristic_id: functional.movement_support, operator: at_most, values: [low]}
+    rationale: Private or static listening character generally conflicts with Party use.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Hype, Uplifting, Euphoric/Energetic, popularity, familiarity, or passive shared enjoyment does not automatically imply Party; require dance function or unusually strong communal participation.]
+version_guidance: [Edits, remixes, and live versions may materially change dance continuity and shared energy.]
+instrumental_vocal_guidance: [Both vocal and instrumental tracks qualify; singalong potential is supportive but not required.]
+overlap_refs: [activity.party__vibe.hype__vibe.euphoric_energetic, activity.party__activity.road_trip__vibe.uplifting_feel_good]

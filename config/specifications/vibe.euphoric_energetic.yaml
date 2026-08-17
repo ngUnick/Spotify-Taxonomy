@@ -1,0 +1,49 @@
+schema_version: "2"
+specification_version: spec.vibe.euphoric_energetic.v1
+logical_playlist_id: vibe.euphoric_energetic
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings with exceptional activation and specifically euphoric, expansive, exhilarating, or triumphant-release character.
+dimension_basis: subjective_character
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Very high arousal with high energy and euphoric release
+    match: all
+    conditions:
+      - {characteristic_id: affect_mood.arousal, operator: at_least, values: [very_high]}
+      - {characteristic_id: energy_dynamics.energy_level, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [euphoric, expansive, exhilarating, triumphant]}
+    rationale: One activation dimension is exceptional, the other remains high, and the emotional character expresses expansion or release.
+  - indicator_id: strong.002
+    summary: Very high energy with high arousal and euphoric release
+    match: all
+    conditions:
+      - {characteristic_id: energy_dynamics.energy_level, operator: at_least, values: [very_high]}
+      - {characteristic_id: affect_mood.arousal, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [euphoric, expansive, exhilarating, triumphant]}
+    rationale: Very high energy can establish the exceptional activation route when arousal remains high and the character is genuinely euphoric or expansive.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Large-scale momentum or bright open atmosphere
+    match: any
+    conditions:
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [high]}
+      - {characteristic_id: atmosphere_space.spatial_openness, operator: at_least, values: [high]}
+      - {characteristic_id: timbre_production.brightness, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [joyful]}
+    rationale: Momentum, openness, brightness, and joy may reinforce exhilaration but do not define it alone.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Subdued or constricted presentation
+    match: any
+    conditions:
+      - {characteristic_id: affect_mood.arousal, operator: at_most, values: [low]}
+      - {characteristic_id: energy_dynamics.energy_level, operator: at_most, values: [low]}
+    rationale: Low activation conflicts with this Vibe even if the recording is pleasant or uplifting.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Merely high-energy happy music is insufficient; gradual builds and spacious releases qualify when one activation dimension is very high and euphoric or expansive character is clear.]
+version_guidance: [Edits, live builds, remixes, and acoustic versions can materially change arousal and must be assessed separately.]
+instrumental_vocal_guidance: [Instrumental and vocal recordings are equally eligible; euphoric sonic evidence may stand without lyrics.]
+overlap_refs: [vibe.uplifting_feel_good__vibe.euphoric_energetic__vibe.hype__vibe.motivational, activity.party__vibe.hype__vibe.euphoric_energetic, activity.gaming__activity.background_music__vibe.euphoric_energetic]

@@ -1,0 +1,38 @@
+schema_version: "2"
+specification_version: spec.genre.soundtracks_scores.v1
+logical_playlist_id: genre.soundtracks_scores
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect original score, incidental music, themes, and songs specifically created for screen, stage, or game works.
+dimension_basis: work_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Documented work-specific musical function
+    match: all
+    conditions:
+      - {characteristic_id: work_context.function, operator: contains_any, values: [original_score, incidental_music, theme, work_specific_song]}
+    rationale: Work-specific composition or function is the defining signal for this exceptional Genre category.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Cinematic or orchestral presentation
+    match: any
+    conditions:
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [cinematic, immersive]}
+      - {characteristic_id: arrangement.orchestral_character, operator: at_least, values: [medium]}
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_least, values: [high]}
+    rationale: These frequently support scores but never replace documented work context.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Ordinary soundtrack compilation appearance without work-specific function
+    match: all
+    conditions:
+      - {characteristic_id: work_context.function, operator: contains_any, values: [soundtrack_compilation_appearance]}
+      - {characteristic_id: work_context.function, operator: contains_none, values: [original_score, incidental_music, theme, work_specific_song]}
+    rationale: Mere appearance on a soundtrack release is negative only when no work-specific creation or function is independently supported.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Do not infer score status from cinematic sound alone; songs written specifically for a work qualify, while pre-existing licensed songs do not automatically qualify.]
+version_guidance: [Covers, concert arrangements, and remixes require evidence that the specific recording retains a work-specific score or theme identity.]
+instrumental_vocal_guidance: [Both instrumental scores and work-specific vocal songs qualify; orchestral or instrumental form is not mandatory.]
+overlap_refs: [genre.soundtracks_scores__genre.style_overlap]

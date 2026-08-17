@@ -1,0 +1,41 @@
+schema_version: "2"
+specification_version: spec.vibe.chill.v1
+logical_playlist_id: vibe.chill
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect varied vocal or instrumental recordings with an independently relaxed, reflective, comfortable-to-sit-with, low-pressure character regardless of genre.
+dimension_basis: subjective_character
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Clearly relaxed low-pressure character with restrained activation
+    match: all
+    conditions:
+      - {characteristic_id: affect_mood.relaxation, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.arousal, operator: at_most, values: [medium]}
+    rationale: Chill requires a perceptibly relaxed listening character rather than happiness, warmth, instrumental status, or slow tempo.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Restrained energy with reflective or comfortable atmosphere
+    match: any
+    conditions:
+      - {characteristic_id: energy_dynamics.energy_level, operator: at_most, values: [medium]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [intimate, spacious, hazy, organic]}
+      - {characteristic_id: energy_dynamics.transient_force, operator: at_most, values: [low]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [serene, warm, melancholic, nostalgic, poignant]}
+    rationale: Subdued energy, reflective depth, gentle melancholy, nostalgia, or atmosphere may support Chill only after low-pressure relaxation is established.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Dominant pressure, agitation, or disruptive force
+    match: any
+    conditions:
+      - {characteristic_id: energy_dynamics.intensity, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [aggressive, tense]}
+      - {characteristic_id: energy_dynamics.transient_force, operator: at_least, values: [very_high]}
+    rationale: Strong pressure, agitation, or disruptive impact generally conflicts with the intended chill-day listening experience.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Low tempo, low energy, acoustic or sparse production, dreaminess, nostalgia, and melancholy are supportive at most; the complete recording must actually feel relaxed and low-pressure.]
+version_guidance: [Remixes, live versions, and acoustic versions are assessed independently because energy and atmosphere may change.]
+instrumental_vocal_guidance: [Vocals of any kind are permitted when the complete recording remains relaxed and low-pressure; instrumental form alone supplies no Chill evidence.]
+overlap_refs: [vibe.chill__vibe.chill_instrumental, vibe.chill__vibe.dreamy_atmospheric, vibe.chill__vibe.emotional_nostalgic, vibe.chill__vibe.dark_sad_melancholic, activity.night_driving__vibe.chill__vibe.dark_sad_melancholic__vibe.dreamy_atmospheric, activity.sleeping__activity.background_music__vibe.chill__vibe.dreamy_atmospheric]

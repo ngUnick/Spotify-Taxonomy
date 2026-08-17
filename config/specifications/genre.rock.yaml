@@ -1,0 +1,37 @@
+schema_version: "2"
+specification_version: spec.genre.rock.v1
+logical_playlist_id: genre.rock
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings rooted in Rock tradition across acoustic, electric, and hybrid production forms.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent Rock tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [rock]}
+    rationale: Rock lineage or recognized Rock style is the decisive genre basis.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Band-centered or guitar-centered arrangement
+    match: any
+    conditions:
+      - {characteristic_id: arrangement.instrumentation, operator: contains_any, values: [guitar_band]}
+      - {characteristic_id: timbre_production.distortion, operator: at_least, values: [medium]}
+    rationale: These often support Rock identification but also occur outside Rock.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Electronic or Pop evidence without Rock tradition
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [rock]}
+      - {characteristic_id: style.traditions, operator: contains_any, values: [pop, electronic]}
+    rationale: Guitar timbre or force alone must not convert adjacent styles into Rock.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Allow Pop-Rock and electronic Rock to occupy multiple genres when each tradition is independently supported.]
+version_guidance: [Live and acoustic versions retain Rock only when the performance remains grounded in Rock tradition; genre-changing remixes are reassessed.]
+instrumental_vocal_guidance: [Instrumental Rock is fully eligible; no vocal style is required.]
+overlap_refs: [genre.pop__genre.rock__genre.electronic]

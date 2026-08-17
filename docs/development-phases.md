@@ -3,7 +3,7 @@
 Each phase ends with tests, exact status/diff, unresolved decisions, and explicit user approval. Work stops
 at every checkpoint. A phase number does not itself authorize service access or external mutations.
 
-Current roadmap status: **Phase 3 COMPLETE. Phase 4 NEXT / NOT STARTED.**
+Current roadmap status: **PHASES 0–4 COMPLETE. PHASE 5 NEXT / NOT STARTED.**
 
 ## Phase 0 — policy baseline, architecture, skeleton and invariants (complete)
 
@@ -30,10 +30,13 @@ review were verified. The final baseline has 806 published occurrences, 744 publ
 740 portable canonical tracks, 744 active account-scoped links, four explicit existing-canonical decisions,
 and no remaining review-required identity. Spotify access remained read-only; no writer exists.
 
-## Phase 4 — finalize V1 taxonomy specifications and characteristic vocabulary (next; not started)
+## Phase 4 — finalize V1 taxonomy specifications and characteristic vocabulary (complete)
 
-Finalize proportional specifications for the 15 broad Genres and the subjective Vibe/Activity playlists,
-then review the characteristic vocabulary required for classification and research sufficiency.
+The explicitly human-reviewed controlled vocabulary, exact 36-file semantic manifest, centralized overlap
+guidance, 51-target registry, Greek/Foreign Genre routing policy, strict schemas, deterministic bundle
+digest, semantic validation, and offline tests are complete. All 15 Genre, 10 Vibe, and 11 Activity
+specifications are `reviewed`. No runtime routing, definition synchronization, research, or classification
+execution was introduced; Phase 5 remains unstarted.
 
 ## Phase 5 — independent research providers, caching, provenance, sufficiency
 

@@ -1,0 +1,38 @@
+schema_version: "2"
+specification_version: spec.genre.blues.v1
+logical_playlist_id: genre.blues
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings grounded in Blues tradition rather than any recording that merely sounds sad or uses blues-influenced harmony.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent Blues tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [blues]}
+    rationale: Blues identity is a musical tradition, not a mood label.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Blues-associated storytelling, band, or expressive traits
+    match: any
+    conditions:
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [storytelling, heartbreak, grief]}
+      - {characteristic_id: arrangement.instrumentation, operator: contains_any, values: [guitar_band, piano_led]}
+      - {characteristic_id: affect_mood.emotional_intensity, operator: at_least, values: [medium]}
+    rationale: These can support researched Blues evidence but also occur broadly elsewhere.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Sad affect without Blues tradition
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [blues]}
+      - {characteristic_id: affect_mood.valence, operator: at_most, values: [negative]}
+    rationale: Negative valence must never be used as a proxy for Blues genre.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Blues-influenced Rock or Jazz may occupy multiple genres only when Blues tradition evidence is substantive.]
+version_guidance: [Covers and live performances are assessed for their performed tradition rather than inheriting the source composition's category.]
+instrumental_vocal_guidance: [Instrumental Blues is eligible; lyrical hardship or storytelling is supporting, not required.]
+overlap_refs: []

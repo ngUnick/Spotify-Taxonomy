@@ -1,0 +1,35 @@
+schema_version: "1"
+routing_policy_version: genre-variant-routing.v1
+applies_to_dimension: genre
+valid_variants: [greek, foreign]
+characteristic_references:
+  vocal_presence: vocals_lyrics.vocal_presence
+  lyrical_language_profile: vocals_lyrics.lyrical_language_profile
+  primary_project_scene_association: cultural_context.primary_project_scene_association
+  regional_musical_association: cultural_context.regional_musical_association
+precedence: [lyrical_language, regional_musical_association, primary_project_scene_association, unresolved]
+lexical_routes:
+  greek: greek
+  non_greek: foreign
+  mixed_greek_dominant: greek
+  mixed_non_greek_dominant: foreign
+  mixed_balanced: unresolved
+instrumental_nonlexical:
+  vocal_presence_values: [instrumental, non_lexical]
+  regional_routes:
+    greek: greek
+    non_greek: continue
+    mixed_or_ambiguous: unresolved
+  project_scene_routes:
+    greek: greek
+    non_greek: foreign
+    mixed_or_ambiguous: unresolved
+  unresolved_result: unresolved
+collaboration:
+  lyrical_language_first: true
+  fallback_to_primary_project_scene: true
+  billing_order_authoritative: false
+  co_equal_result: unresolved
+unknown_result: unresolved
+non_greek_scope: all_non_greek_languages_and_contexts
+version_scope: exact_canonical_recording

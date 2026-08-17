@@ -5,9 +5,10 @@ These rules apply throughout this repository.
 ## Phase boundaries
 
 - Stop at the phase requested by the user. Never begin a later phase implicitly.
-- Phases 0 through 3 are complete. Phase 4 has not started and must not begin without explicit user
-  authorization. Ordinary tests remain socket-blocked and synthetic. Any further real Spotify read,
-  classification/research access, or mutation requires a separately approved checkpoint.
+- Phases 0 through 4 are complete. The 36 Phase 4 specifications and controlled vocabulary are explicitly
+  human-reviewed; Phase 5 is next and has not started. Do not begin Phase 5 without explicit authorization.
+  Ordinary tests remain socket-blocked and synthetic. Any
+  real Spotify read, classification/research access, or mutation requires a separately approved checkpoint.
 
 ## Credentials and user data
 

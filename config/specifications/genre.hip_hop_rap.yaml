@@ -1,0 +1,38 @@
+schema_version: "2"
+specification_version: spec.genre.hip_hop_rap.v1
+logical_playlist_id: genre.hip_hop_rap
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings rooted in Hip-Hop culture or Rap tradition, including instrumental and cross-genre forms.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent Hip-Hop tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [hip_hop]}
+    rationale: Cultural and stylistic Hip-Hop evidence is primary; a spoken vocal alone is not enough.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Rap performance or sample-centered production
+    match: any
+    conditions:
+      - {characteristic_id: vocals_lyrics.vocal_style, operator: contains_any, values: [rap]}
+      - {characteristic_id: arrangement.instrumentation, operator: contains_any, values: [turntablism_samples]}
+      - {characteristic_id: tempo_rhythm.groove, operator: contains_any, values: [breakbeat, halftime]}
+    rationale: These reinforce independently supported Hip-Hop/Rap classification.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Rap-like delivery without Hip-Hop grounding
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [hip_hop]}
+      - {characteristic_id: vocals_lyrics.vocal_style, operator: contains_any, values: [spoken, rap]}
+    rationale: Spoken or rhythmic delivery in another tradition is not automatically Hip-Hop/Rap.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Pop-Rap and R&B/Hip-Hop hybrids may receive multiple genre proposals when each tradition is evidenced.]
+version_guidance: [Instrumentals, remixes, and genre-shifting covers are evaluated independently; clean and explicit edits normally share genre.]
+instrumental_vocal_guidance: [Instrumental Hip-Hop is eligible through production and tradition evidence; Rap vocals are not mandatory.]
+overlap_refs: [genre.rnb_soul__genre.pop__genre.hip_hop_rap]

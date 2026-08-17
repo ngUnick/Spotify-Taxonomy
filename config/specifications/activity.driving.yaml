@@ -1,0 +1,54 @@
+schema_version: "2"
+specification_version: spec.activity.driving.v1
+logical_playlist_id: activity.driving
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings that sustain alert, comfortable forward engagement during ordinary driving without requiring a nocturnal or road-trip character.
+dimension_basis: functional_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Comfortable sustained motion with low-to-medium attention demand
+    match: all
+    conditions:
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [medium]}
+      - {characteristic_id: structure_attention.attention_demand, operator: at_most, values: [medium]}
+    rationale: The normal Driving fit combines continuing engagement with comfortable cognitive demand.
+  - indicator_id: strong.002
+    summary: Exceptional driving continuity despite high attention demand
+    match: all
+    conditions:
+      - {characteristic_id: structure_attention.attention_demand, operator: equals, values: [high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [high]}
+      - {characteristic_id: tempo_rhythm.rhythmic_stability, operator: at_least, values: [high]}
+    rationale: A high-attention recording remains reviewable only when unusually strong momentum and rhythmic continuity support driving.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Rhythmic continuity and moderate-to-high energy
+    match: any
+    conditions:
+      - {characteristic_id: tempo_rhythm.rhythmic_stability, operator: at_least, values: [medium]}
+      - {characteristic_id: energy_dynamics.energy_level, operator: between, values: [medium, high]}
+      - {characteristic_id: functional.travel_endurance, operator: at_least, values: [medium]}
+    rationale: These support comfortable motion while permitting varied genres and moods.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Excessive disruption, very low engagement, or high cognitive capture
+    match: any
+    conditions:
+      - {characteristic_id: structure_attention.abrupt_change_risk, operator: at_least, values: [very_high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_most, values: [very_low]}
+      - {characteristic_id: structure_attention.attention_demand, operator: equals, values: [high]}
+    rationale: Extreme disruption, loss of momentum, or high attention demand undermines the normal fit; high attention remains conflicting review evidence rather than a hard exclusion.
+  - indicator_id: negative.002
+    summary: Very high cognitive capture
+    match: all
+    conditions:
+      - {characteristic_id: structure_attention.attention_demand, operator: equals, values: [very_high]}
+    rationale: Very high attention demand strongly opposes ordinary driving suitability.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Night Driving and Road Trip do not imply Driving; high-attention tracks require unusually strong driving continuity and remain review cases.]
+version_guidance: [Long edits, live versions, and remixes require reassessment when momentum, duration, or abruptness changes.]
+instrumental_vocal_guidance: [Both vocal and instrumental recordings are eligible; vocals matter only through attention demand and overall comfort.]
+overlap_refs: [activity.driving__activity.night_driving__activity.road_trip]

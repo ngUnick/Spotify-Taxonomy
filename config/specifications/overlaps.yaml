@@ -1,0 +1,135 @@
+schema_version: "1"
+specification_set_version: specifications.v1
+overlaps:
+  - overlap_id: vibe.chill__vibe.chill_instrumental
+    playlist_ids: [vibe.chill, vibe.chill_instrumental]
+    relationship: nested
+    both_allowed: true
+    distinguishing_characteristics: [affect_mood.arousal, energy_dynamics.energy_level, vocals_lyrics.vocal_presence]
+    guidance: Relaxed low-pressure Chill character must be established independently; instrumental, non-lexical, or sparse sampled vocals then permit the nested specialization, while ordinary lyrical lead vocals do not.
+  - overlap_id: vibe.chill__vibe.dreamy_atmospheric
+    playlist_ids: [vibe.chill, vibe.dreamy_atmospheric]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [affect_mood.relaxation, affect_mood.arousal, atmosphere_space.atmospheric_prominence]
+    guidance: Chill requires a relaxed low-pressure listening character, while Dreamy requires atmosphere to be primary and genuinely ethereal, hazy, dreamlike, or conditionally soft and spacious. Dreaminess or space alone never implies Chill.
+  - overlap_id: vibe.chill__vibe.emotional_nostalgic
+    playlist_ids: [vibe.chill, vibe.emotional_nostalgic]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [affect_mood.relaxation, affect_mood.emotional_intensity, affect_mood.qualities]
+    guidance: Reflective, nostalgic, or poignant depth may coexist with Chill when the whole recording remains relaxed and low-pressure; emotional resonance or nostalgia alone does not establish Chill.
+  - overlap_id: vibe.chill__vibe.dark_sad_melancholic
+    playlist_ids: [vibe.chill, vibe.dark_sad_melancholic]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [affect_mood.relaxation, affect_mood.valence, energy_dynamics.intensity]
+    guidance: Gentle melancholy or negative valence may coexist with Chill when perceptual pressure stays low. Dominant agitation, force, aggression, tension, or disruptive activation pushes away from Chill even when Dark remains valid.
+  - overlap_id: vibe.uplifting_feel_good__vibe.euphoric_energetic__vibe.hype__vibe.motivational
+    playlist_ids: [vibe.uplifting_feel_good, vibe.euphoric_energetic, vibe.hype, vibe.motivational]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [affect_mood.positive_elevation, affect_mood.arousal, energy_dynamics.energy_level, energy_dynamics.intensity, affect_mood.determination, functional.personal_activation, functional.social_activation]
+    guidance: Uplifting requires positive elevation, with mixed valence reserved for exceptional uplift; Euphoric requires exceptional activation plus expansive release; Hype requires forceful personal or social activation without positive valence; Motivational requires purposeful determination or perseverance. Treat all four as independent overlapping axes.
+  - overlap_id: vibe.dark_sad_melancholic__vibe.emotional_nostalgic
+    playlist_ids: [vibe.dark_sad_melancholic, vibe.emotional_nostalgic]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [affect_mood.valence, affect_mood.qualities, affect_mood.emotional_intensity]
+    guidance: Dark requires dominant negative, bleak, ominous, sad, or melancholic character; Emotional/Nostalgic requires poignancy, memory, or strong affect and may be positive, negative, or mixed.
+  - overlap_id: vibe.dark_sad_melancholic__vibe.emotional_nostalgic__vibe.romantic
+    playlist_ids: [vibe.dark_sad_melancholic, vibe.emotional_nostalgic, vibe.romantic]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [affect_mood.valence, affect_mood.emotional_intensity, affect_mood.qualities, vocals_lyrics.themes]
+    guidance: Heartbreak or relationship subject matter alone does not establish Romantic. Tragic or bittersweet love may overlap Dark and Emotional when active romantic attachment, intimacy, or independently romantic sonic character remains clear.
+  - overlap_id: activity.driving__activity.night_driving__activity.road_trip
+    playlist_ids: [activity.driving, activity.night_driving, activity.road_trip]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [functional.sustained_momentum, atmosphere_space.qualities, functional.travel_endurance]
+    guidance: Evaluate each activity independently. Driving normally favors low-to-medium attention; Night Driving adds explicit nocturnal or conditionally strong atmospheric identity; Road Trip adds extended-travel endurance. No specialized membership implies Driving.
+  - overlap_id: activity.night_driving__activity.gaming__vibe.dreamy_atmospheric
+    playlist_ids: [activity.night_driving, activity.gaming, vibe.dreamy_atmospheric]
+    relationship: cross_dimension
+    both_allowed: true
+    distinguishing_characteristics: [functional.sustained_momentum, functional.interactive_engagement, atmosphere_space.atmospheric_prominence, atmosphere_space.qualities]
+    guidance: Night Driving needs sustained motion plus nocturnal or conditionally convincing night atmosphere; Gaming needs interactive support; Dreamy needs atmosphere itself to be ethereal, hazy, dreamlike, or softly diffused. Shared immersion never implies another membership.
+  - overlap_id: activity.night_driving__vibe.chill__vibe.dark_sad_melancholic__vibe.dreamy_atmospheric
+    playlist_ids: [activity.night_driving, vibe.chill, vibe.dark_sad_melancholic, vibe.dreamy_atmospheric]
+    relationship: cross_dimension
+    both_allowed: true
+    distinguishing_characteristics: [functional.sustained_momentum, affect_mood.relaxation, affect_mood.valence, atmosphere_space.atmospheric_prominence, atmosphere_space.qualities]
+    guidance: Night Driving needs sustained motion and an explicit or conditionally convincing night-driving atmosphere; Chill needs relaxed low pressure; Dark needs dominant negative or ominous affect; Dreamy needs primary dreamlike atmosphere. Darkness, calm, or atmosphere alone never implies Night Driving, and Night Driving implies none of these Vibes.
+  - overlap_id: activity.gym__activity.running
+    playlist_ids: [activity.gym, activity.running]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [functional.exercise_activation, functional.pacing_compatibility, tempo_rhythm.rhythmic_stability]
+    guidance: Gym emphasizes intensity, force, and exercise activation; Running emphasizes stable pacing, continuity, and sustained momentum. Neither is a subset of the other.
+  - overlap_id: activity.studying__activity.coding_focus__activity.background_music
+    playlist_ids: [activity.studying, activity.coding_focus, activity.background_music]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [functional.focus_support, functional.background_compatibility, structure_attention.distraction_risk]
+    guidance: Evaluate all three independently. Studying prioritizes low distraction, Coding/Focus may tolerate stronger repetitive momentum, and Background Music permits broader unobtrusive listening including suitable vocals.
+  - overlap_id: activity.gaming__activity.coding_focus__vibe.hype__vibe.dreamy_atmospheric
+    playlist_ids: [activity.gaming, activity.coding_focus, vibe.hype, vibe.dreamy_atmospheric]
+    relationship: cross_dimension
+    both_allowed: true
+    distinguishing_characteristics: [functional.interactive_engagement, functional.focus_support, functional.personal_activation, atmosphere_space.atmospheric_prominence]
+    guidance: Gaming requires interactive support through atmospheric, responsive-action, or strategic-focus evidence; Coding requires productive task flow; Hype requires forceful activation; Dreamy requires primary dreamlike atmosphere. Generic engagement, force, focus, or immersion alone does not imply Gaming.
+  - overlap_id: activity.gaming__activity.background_music__vibe.euphoric_energetic
+    playlist_ids: [activity.gaming, activity.background_music, vibe.euphoric_energetic]
+    relationship: cross_dimension
+    both_allowed: true
+    distinguishing_characteristics: [functional.interactive_engagement, functional.background_compatibility, affect_mood.arousal, affect_mood.qualities]
+    guidance: Gaming requires independently evidenced gameplay support; Background Music requires broad unobtrusiveness; Euphoric/Energetic requires exceptional exhilaration or release. A track may serve more than one role, but generic engagement, unobtrusiveness, or high activation implies none of the others.
+  - overlap_id: activity.party__vibe.hype__vibe.euphoric_energetic
+    playlist_ids: [activity.party, vibe.hype, vibe.euphoric_energetic]
+    relationship: cross_dimension
+    both_allowed: true
+    distinguishing_characteristics: [functional.social_activation, functional.communal_participation, tempo_rhythm.dance_impulse, affect_mood.arousal]
+    guidance: Party requires dance-oriented social function or unusually strong communal participation; Hype and Euphoric/Energetic describe subjective activation or release. Cross-dimension membership is expected but never implied.
+  - overlap_id: activity.party__activity.road_trip__vibe.uplifting_feel_good
+    playlist_ids: [activity.party, activity.road_trip, vibe.uplifting_feel_good]
+    relationship: cross_dimension
+    both_allowed: true
+    distinguishing_characteristics: [functional.communal_participation, functional.social_activation, functional.travel_endurance, affect_mood.positive_elevation]
+    guidance: Party needs dance or active communal participation; Road Trip needs extended-travel endurance and treats companionship as optional; Uplifting needs mood elevation. Familiarity, happiness, or passive shared enjoyment establishes none of them by itself.
+  - overlap_id: activity.sleeping__activity.background_music__vibe.chill__vibe.dreamy_atmospheric
+    playlist_ids: [activity.sleeping, activity.background_music, vibe.chill, vibe.dreamy_atmospheric]
+    relationship: cross_dimension
+    both_allowed: true
+    distinguishing_characteristics: [functional.sleep_disruption_risk, functional.background_compatibility, affect_mood.relaxation, affect_mood.tension, atmosphere_space.atmospheric_prominence]
+    guidance: Sleeping requires low energy and low disruption, with tension and emotional intensity counted negatively; Background Music requires broad unobtrusiveness; Chill requires relaxed low pressure; Dreamy requires primary dreamlike atmosphere. None implies another.
+  - overlap_id: genre.pop__genre.rock__genre.electronic
+    playlist_ids: [genre.pop, genre.rock, genre.electronic]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [style.traditions, arrangement.acoustic_electronic_balance, arrangement.instrumentation]
+    guidance: Treat each independently supported tradition as eligible; hybrid production can justify multiple broad genres, while instrumentation alone is supporting rather than conclusive.
+  - overlap_id: genre.folk_acoustic__genre.country
+    playlist_ids: [genre.folk_acoustic, genre.country]
+    relationship: boundary
+    both_allowed: true
+    distinguishing_characteristics: [style.traditions, arrangement.instrumentation, vocals_lyrics.themes]
+    guidance: Acoustic balance or instrumentation alone does not establish Folk/Acoustic or Country. Folk lineage independently qualifies; the separate acoustic route requires both fully/mostly acoustic balance and contextual evidence of a substantive acoustic performance or songwriting idiom. Country still requires independent tradition evidence, and both destinations remain available when independently supported.
+  - overlap_id: genre.rnb_soul__genre.pop__genre.hip_hop_rap
+    playlist_ids: [genre.rnb_soul, genre.pop, genre.hip_hop_rap]
+    relationship: overlapping
+    both_allowed: true
+    distinguishing_characteristics: [style.traditions, vocals_lyrics.vocal_style, tempo_rhythm.groove]
+    guidance: R&B/Soul is one combined broad category. Pop accessibility, rap performance, or adjacent production may support additional genres but cannot replace independent R&B or Soul tradition evidence.
+  - overlap_id: genre.latin__genre.world_traditional
+    playlist_ids: [genre.latin, genre.world_traditional]
+    relationship: conditional
+    both_allowed: true
+    distinguishing_characteristics: [style.traditions, arrangement.instrumentation, tempo_rhythm.groove]
+    guidance: Modern Latin music does not automatically enter World/Traditional. Both require independent traditional, regional, folk, or culturally grounded evidence relevant to World/Traditional.
+  - overlap_id: genre.soundtracks_scores__genre.style_overlap
+    playlist_ids: [genre.soundtracks_scores, genre.classical, genre.electronic, genre.world_traditional]
+    relationship: cross_dimension
+    both_allowed: true
+    distinguishing_characteristics: [work_context.function, style.traditions, arrangement.orchestral_character]
+    guidance: Soundtracks/Scores is the intentional work-context-based Genre exception. Original score, incidental music, themes, and work-specific songs qualify by function; compilation appearance counts negatively only without work-specific function. Style-based Genre overlap remains independently available.

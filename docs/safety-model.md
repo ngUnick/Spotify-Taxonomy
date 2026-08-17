@@ -15,6 +15,9 @@ registered ingestion source has been deliberately disabled.
 
 Unknown/unregistered targets are read-only. Display names and taxonomy labels never confer authority. A
 playlist named “Rock” is not writable unless its stable Spotify ID is explicitly registered as managed.
+Likewise, future Greek/Foreign display names confer no authority. The later managed-playlist phase must bind
+each registration to its stable `output_target_id`, not infer a target from its name or from the parent
+semantic `logical_playlist_id` alone.
 
 ## Guarded write path
 

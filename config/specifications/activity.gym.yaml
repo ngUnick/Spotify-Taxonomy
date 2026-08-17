@@ -1,0 +1,39 @@
+schema_version: "2"
+specification_version: spec.activity.gym.v1
+logical_playlist_id: activity.gym
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings that activate demanding exercise through intensity, drive, force, or determined energy.
+dimension_basis: functional_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Strong exercise activation and intensity
+    match: all
+    conditions:
+      - {characteristic_id: functional.exercise_activation, operator: at_least, values: [high]}
+      - {characteristic_id: energy_dynamics.intensity, operator: at_least, values: [high]}
+    rationale: Gym suitability centers on activation and usable physical force.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Driving rhythm, impact, or determination
+    match: any
+    conditions:
+      - {characteristic_id: tempo_rhythm.rhythmic_drive, operator: at_least, values: [high]}
+      - {characteristic_id: energy_dynamics.transient_force, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.determination, operator: at_least, values: [high]}
+    rationale: Aggression is permitted but not required when other activation signals are strong.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Subdued energy and weak movement support
+    match: all
+    conditions:
+      - {characteristic_id: energy_dynamics.energy_level, operator: at_most, values: [low]}
+      - {characteristic_id: functional.movement_support, operator: at_most, values: [low]}
+    rationale: Low activation generally conflicts with demanding exercise use.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Gym and Running are separate axes; irregular but forceful music may suit Gym without supporting steady running pace.]
+version_guidance: [Remixes, live versions, and edits require reassessment when intensity or exercise activation changes.]
+instrumental_vocal_guidance: [Both vocal and instrumental tracks qualify; motivational or aggressive lyrics are supporting rather than required.]
+overlap_refs: [activity.gym__activity.running]

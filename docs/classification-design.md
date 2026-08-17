@@ -23,9 +23,12 @@ It does not archive whole pages. Contradictory claims remain separate records an
 confidence. Insufficient information produces a review state rather than invented certainty.
 
 A derived characteristic references its supporting evidence IDs, confidence, derivation version, origin,
-and a compact justification. Characteristics precede final playlist proposals. Examples may later include
-energy, rhythmic drive, intensity, atmosphere, valence-like affect, vocal prominence, or instrumental
-character; this list is illustrative and is not a finalized taxonomy.
+and a compact justification. Characteristics precede final playlist proposals. Phase 4 defines the
+controlled vocabulary in `config/characteristics.yaml`: 58 reusable characteristics across style,
+work-context, version, arrangement, vocals/lyrics, cultural context, tempo/rhythm, energy/dynamics, timbre/production,
+affect/mood, atmosphere/space, structure/attention, and functional-suitability families. Missing evidence
+means unknown, and contradictory assertions are preserved. Phase 4 defines schemas and decision inputs;
+derivation and persistence execution remain later work.
 
 ## Genre, vibe, and activity
 
@@ -38,12 +41,32 @@ Vibes and activities consume playlist specifications, evidence, characteristics,
 examples. Activity logic may reuse characteristics and vibe-relevant concepts through explicit scoring or
 rules. It does not need to independently rediscover energy or atmosphere for each playlist.
 
+The Phase 4 specifications are balanced, multi-label decision guides. A coherent secondary fit is allowed,
+zero or several assignments per dimension remain possible, and material ambiguity results in abstention.
+Strong and supporting indicators are distinct from negative indicators and rare hard exclusions; a missing
+value never satisfies a negative condition. Centralized overlap records document intentional nesting,
+independent axes, and cross-dimension overlap without creating automatic inheritance.
+
+Genre classification and physical output routing are separate decisions. The 15 Genre specifications
+determine musical membership without language or nationality criteria. A separate exact-recording routing
+policy then selects Greek or Foreign from lyrical-language evidence, or from regional and project/scene
+context for instrumental/non-lexical recordings. One routing result can combine with several independent
+Genre memberships; unresolved routing remains reviewable and does not erase semantic membership.
+
+Genre specifications normally declare `musical_style` as their basis. Soundtracks/Scores is the narrow
+exception: it declares `work_context` because documented score, incidental, theme, or work-specific-song
+function establishes membership. Its musical-style overlaps remain separate Genre decisions.
+
 ## Proposal output
 
 Every proposal contains a logical playlist ID, include/exclude/abstain decision, confidence, proposal origin,
 taxonomy and specification versions, review status, relevant evidence/characteristic IDs, and a concise
 justification summary. The current domain contract caps that summary at 280 characters. It intentionally
 does not request or persist extensive model reasoning.
+
+Phase 4 defines only the routing policy and output-target registry; it does not add a runtime routing
+proposal or decision service. A later desired-state phase must combine approved semantic assignments with
+an independently reviewable variant result and stable `output_target_id`.
 
 Generated proposals are suggestions, not truth. A user may approve or reject them, add an unproposed
 assignment, explicitly exclude a track, or revise a prior decision. Precedence is:

@@ -1,5 +1,7 @@
-schema_version: "2"
+schema_version: "3"
 taxonomy_path: taxonomy.yaml
+characteristic_vocabulary_path: characteristics.yaml
+specification_manifest_path: specifications/manifest.yaml
 database_filename: app.db
 log_level: INFO
 file_logging: false

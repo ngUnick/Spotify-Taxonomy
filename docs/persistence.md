@@ -58,6 +58,19 @@ The scan content digest stores an explicit `digest_version` and excludes page-re
 Only completed current publications from active sources are matching inputs. Staged state in pending,
 running, failed, stale, or abandoned scans remains historical and non-authoritative.
 
+## Phase 4 non-persistence boundary
+
+The Phase 4 characteristic vocabulary, specification manifest, overlap guidance, 36 semantic playlist
+specifications, 51-target registry, and Genre variant-routing policy are source-controlled reviewed documents.
+Phase 4 validation reads them without opening or modifying SQLite. The existing `specification_versions`
+table does not imply automatic synchronization; runtime consumption and synchronization remain deferred to
+the later phase that needs these definitions. Phase 4 adds no migration.
+
+The existing managed-playlist registration shape contains only `logical_playlist_id`; it is intentionally
+unchanged here. The later managed-playlist/desired-state phase must migrate that boundary to bind a managed
+registration to stable `output_target_id`, allowing Greek and Foreign targets to share one semantic Genre
+parent without relying on display names.
+
 ## Backup and restore
 
 Backups use SQLite's consistent backup API and a small JSON manifest with schema/taxonomy/specification

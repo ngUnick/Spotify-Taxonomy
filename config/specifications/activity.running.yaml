@@ -1,0 +1,40 @@
+schema_version: "2"
+specification_version: spec.activity.running.v1
+logical_playlist_id: activity.running
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings that support sustained running through rhythmic stability, pacing compatibility, continuity, and durable momentum.
+dimension_basis: functional_context
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Stable pacing with sustained momentum
+    match: all
+    conditions:
+      - {characteristic_id: functional.pacing_compatibility, operator: at_least, values: [high]}
+      - {characteristic_id: tempo_rhythm.rhythmic_stability, operator: at_least, values: [high]}
+      - {characteristic_id: functional.sustained_momentum, operator: at_least, values: [high]}
+    rationale: Running favors continuity and pacing rather than maximum force alone.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Movement support and moderate-or-higher energy
+    match: any
+    conditions:
+      - {characteristic_id: functional.movement_support, operator: at_least, values: [high]}
+      - {characteristic_id: energy_dynamics.energy_level, operator: at_least, values: [medium]}
+      - {characteristic_id: tempo_rhythm.momentum, operator: at_least, values: [high]}
+    rationale: These reinforce sustained physical pacing across different personal speeds.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Unstable pulse or repeated momentum breaks
+    match: any
+    conditions:
+      - {characteristic_id: tempo_rhythm.rhythmic_stability, operator: at_most, values: [low]}
+      - {characteristic_id: structure_attention.abrupt_change_risk, operator: at_least, values: [high]}
+    rationale: Irregularity can disrupt pacing even when the track is intense enough for Gym.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Do not impose one BPM range for all users; use pacing compatibility and continuity rather than raw tempo alone.]
+version_guidance: [Extended mixes may improve continuity while live or edited versions may disrupt it; evaluate the exact version.]
+instrumental_vocal_guidance: [Vocals are allowed when they do not materially interrupt pacing or continuity.]
+overlap_refs: [activity.gym__activity.running]

@@ -1,39 +1,39 @@
 schema_version: "1"
 taxonomy_version: taxonomy.v1
 playlists:
-  - {logical_id: genre.pop, dimension: genre, display_name: Pop, enabled: true, specification_status: draft}
-  - {logical_id: genre.rock, dimension: genre, display_name: Rock, enabled: true, specification_status: draft}
-  - {logical_id: genre.metal, dimension: genre, display_name: Metal, enabled: true, specification_status: draft}
-  - {logical_id: genre.hip_hop_rap, dimension: genre, display_name: Hip-Hop / Rap, enabled: true, specification_status: draft}
-  - {logical_id: genre.electronic, dimension: genre, display_name: Electronic, enabled: true, specification_status: draft}
-  - {logical_id: genre.rnb_soul, dimension: genre, display_name: R&B / Soul, enabled: true, specification_status: draft}
-  - {logical_id: genre.jazz, dimension: genre, display_name: Jazz, enabled: true, specification_status: draft}
-  - {logical_id: genre.blues, dimension: genre, display_name: Blues, enabled: true, specification_status: draft}
-  - {logical_id: genre.classical, dimension: genre, display_name: Classical, enabled: true, specification_status: draft}
-  - {logical_id: genre.folk_acoustic, dimension: genre, display_name: Folk / Acoustic, enabled: true, specification_status: draft}
-  - {logical_id: genre.country, dimension: genre, display_name: Country, enabled: true, specification_status: draft}
-  - {logical_id: genre.reggae_ska, dimension: genre, display_name: Reggae / Ska, enabled: true, specification_status: draft}
-  - {logical_id: genre.latin, dimension: genre, display_name: Latin, enabled: true, specification_status: draft}
-  - {logical_id: genre.world_traditional, dimension: genre, display_name: World / Traditional, enabled: true, specification_status: draft}
-  - {logical_id: genre.soundtracks_scores, dimension: genre, display_name: Soundtracks / Scores, enabled: true, specification_status: draft}
-  - {logical_id: vibe.chill, dimension: vibe, display_name: Chill, enabled: true, specification_status: draft}
-  - {logical_id: vibe.chill_instrumental, dimension: vibe, display_name: Chill — Instrumental, enabled: true, specification_status: draft}
-  - {logical_id: vibe.uplifting_feel_good, dimension: vibe, display_name: Uplifting / Feel Good, enabled: true, specification_status: draft}
-  - {logical_id: vibe.euphoric_energetic, dimension: vibe, display_name: Euphoric / Energetic, enabled: true, specification_status: draft}
-  - {logical_id: vibe.hype, dimension: vibe, display_name: Hype, enabled: true, specification_status: draft}
-  - {logical_id: vibe.motivational, dimension: vibe, display_name: Motivational, enabled: true, specification_status: draft}
-  - {logical_id: vibe.dark_sad_melancholic, dimension: vibe, display_name: Dark / Sad / Melancholic, enabled: true, specification_status: draft}
-  - {logical_id: vibe.emotional_nostalgic, dimension: vibe, display_name: Emotional / Nostalgic, enabled: true, specification_status: draft}
-  - {logical_id: vibe.dreamy_atmospheric, dimension: vibe, display_name: Dreamy / Atmospheric, enabled: true, specification_status: draft}
-  - {logical_id: vibe.romantic, dimension: vibe, display_name: Romantic, enabled: true, specification_status: draft}
-  - {logical_id: activity.driving, dimension: activity, display_name: Driving, enabled: true, specification_status: draft}
-  - {logical_id: activity.night_driving, dimension: activity, display_name: Night Driving, enabled: true, specification_status: draft}
-  - {logical_id: activity.gym, dimension: activity, display_name: Gym, enabled: true, specification_status: draft}
-  - {logical_id: activity.running, dimension: activity, display_name: Running, enabled: true, specification_status: draft}
-  - {logical_id: activity.studying, dimension: activity, display_name: Studying, enabled: true, specification_status: draft}
-  - {logical_id: activity.coding_focus, dimension: activity, display_name: Coding / Focus, enabled: true, specification_status: draft}
-  - {logical_id: activity.gaming, dimension: activity, display_name: Gaming, enabled: true, specification_status: draft}
-  - {logical_id: activity.background_music, dimension: activity, display_name: Background Music, enabled: true, specification_status: draft}
-  - {logical_id: activity.sleeping, dimension: activity, display_name: Sleeping, enabled: true, specification_status: draft}
-  - {logical_id: activity.party, dimension: activity, display_name: Party, enabled: true, specification_status: draft}
-  - {logical_id: activity.road_trip, dimension: activity, display_name: Road Trip, enabled: true, specification_status: draft}
+  - {logical_id: genre.pop, dimension: genre, display_name: Pop, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.rock, dimension: genre, display_name: Rock, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.metal, dimension: genre, display_name: Metal, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.hip_hop_rap, dimension: genre, display_name: Hip-Hop / Rap, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.electronic, dimension: genre, display_name: Electronic, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.rnb_soul, dimension: genre, display_name: R&B / Soul, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.jazz, dimension: genre, display_name: Jazz, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.blues, dimension: genre, display_name: Blues, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.classical, dimension: genre, display_name: Classical, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.folk_acoustic, dimension: genre, display_name: Folk / Acoustic, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.country, dimension: genre, display_name: Country, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.reggae_ska, dimension: genre, display_name: Reggae / Ska, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.latin, dimension: genre, display_name: Latin, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.world_traditional, dimension: genre, display_name: World / Traditional, enabled: true, specification_status: reviewed}
+  - {logical_id: genre.soundtracks_scores, dimension: genre, display_name: Soundtracks / Scores, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.chill, dimension: vibe, display_name: Chill, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.chill_instrumental, dimension: vibe, display_name: Chill — Instrumental, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.uplifting_feel_good, dimension: vibe, display_name: Uplifting / Feel Good, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.euphoric_energetic, dimension: vibe, display_name: Euphoric / Energetic, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.hype, dimension: vibe, display_name: Hype, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.motivational, dimension: vibe, display_name: Motivational, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.dark_sad_melancholic, dimension: vibe, display_name: Dark / Sad / Melancholic, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.emotional_nostalgic, dimension: vibe, display_name: Emotional / Nostalgic, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.dreamy_atmospheric, dimension: vibe, display_name: Dreamy / Atmospheric, enabled: true, specification_status: reviewed}
+  - {logical_id: vibe.romantic, dimension: vibe, display_name: Romantic, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.driving, dimension: activity, display_name: Driving, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.night_driving, dimension: activity, display_name: Night Driving, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.gym, dimension: activity, display_name: Gym, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.running, dimension: activity, display_name: Running, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.studying, dimension: activity, display_name: Studying, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.coding_focus, dimension: activity, display_name: Coding / Focus, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.gaming, dimension: activity, display_name: Gaming, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.background_music, dimension: activity, display_name: Background Music, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.sleeping, dimension: activity, display_name: Sleeping, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.party, dimension: activity, display_name: Party, enabled: true, specification_status: reviewed}
+  - {logical_id: activity.road_trip, dimension: activity, display_name: Road Trip, enabled: true, specification_status: reviewed}

@@ -1,0 +1,54 @@
+schema_version: "1"
+output_target_set_version: output-targets.v1
+targets:
+  - {output_target_id: output.genre.pop.greek, logical_playlist_id: genre.pop, variant_id: greek, display_name: Greek Pop}
+  - {output_target_id: output.genre.pop.foreign, logical_playlist_id: genre.pop, variant_id: foreign, display_name: Foreign Pop}
+  - {output_target_id: output.genre.rock.greek, logical_playlist_id: genre.rock, variant_id: greek, display_name: Greek Rock}
+  - {output_target_id: output.genre.rock.foreign, logical_playlist_id: genre.rock, variant_id: foreign, display_name: Foreign Rock}
+  - {output_target_id: output.genre.metal.greek, logical_playlist_id: genre.metal, variant_id: greek, display_name: Greek Metal}
+  - {output_target_id: output.genre.metal.foreign, logical_playlist_id: genre.metal, variant_id: foreign, display_name: Foreign Metal}
+  - {output_target_id: output.genre.hip_hop_rap.greek, logical_playlist_id: genre.hip_hop_rap, variant_id: greek, display_name: Greek Hip-Hop / Rap}
+  - {output_target_id: output.genre.hip_hop_rap.foreign, logical_playlist_id: genre.hip_hop_rap, variant_id: foreign, display_name: Foreign Hip-Hop / Rap}
+  - {output_target_id: output.genre.electronic.greek, logical_playlist_id: genre.electronic, variant_id: greek, display_name: Greek Electronic}
+  - {output_target_id: output.genre.electronic.foreign, logical_playlist_id: genre.electronic, variant_id: foreign, display_name: Foreign Electronic}
+  - {output_target_id: output.genre.rnb_soul.greek, logical_playlist_id: genre.rnb_soul, variant_id: greek, display_name: Greek R&B / Soul}
+  - {output_target_id: output.genre.rnb_soul.foreign, logical_playlist_id: genre.rnb_soul, variant_id: foreign, display_name: Foreign R&B / Soul}
+  - {output_target_id: output.genre.jazz.greek, logical_playlist_id: genre.jazz, variant_id: greek, display_name: Greek Jazz}
+  - {output_target_id: output.genre.jazz.foreign, logical_playlist_id: genre.jazz, variant_id: foreign, display_name: Foreign Jazz}
+  - {output_target_id: output.genre.blues.greek, logical_playlist_id: genre.blues, variant_id: greek, display_name: Greek Blues}
+  - {output_target_id: output.genre.blues.foreign, logical_playlist_id: genre.blues, variant_id: foreign, display_name: Foreign Blues}
+  - {output_target_id: output.genre.classical.greek, logical_playlist_id: genre.classical, variant_id: greek, display_name: Greek Classical}
+  - {output_target_id: output.genre.classical.foreign, logical_playlist_id: genre.classical, variant_id: foreign, display_name: Foreign Classical}
+  - {output_target_id: output.genre.folk_acoustic.greek, logical_playlist_id: genre.folk_acoustic, variant_id: greek, display_name: Greek Folk / Acoustic}
+  - {output_target_id: output.genre.folk_acoustic.foreign, logical_playlist_id: genre.folk_acoustic, variant_id: foreign, display_name: Foreign Folk / Acoustic}
+  - {output_target_id: output.genre.country.greek, logical_playlist_id: genre.country, variant_id: greek, display_name: Greek Country}
+  - {output_target_id: output.genre.country.foreign, logical_playlist_id: genre.country, variant_id: foreign, display_name: Foreign Country}
+  - {output_target_id: output.genre.reggae_ska.greek, logical_playlist_id: genre.reggae_ska, variant_id: greek, display_name: Greek Reggae / Ska}
+  - {output_target_id: output.genre.reggae_ska.foreign, logical_playlist_id: genre.reggae_ska, variant_id: foreign, display_name: Foreign Reggae / Ska}
+  - {output_target_id: output.genre.latin.greek, logical_playlist_id: genre.latin, variant_id: greek, display_name: Greek Latin}
+  - {output_target_id: output.genre.latin.foreign, logical_playlist_id: genre.latin, variant_id: foreign, display_name: Foreign Latin}
+  - {output_target_id: output.genre.world_traditional.greek, logical_playlist_id: genre.world_traditional, variant_id: greek, display_name: Greek World / Traditional}
+  - {output_target_id: output.genre.world_traditional.foreign, logical_playlist_id: genre.world_traditional, variant_id: foreign, display_name: Foreign World / Traditional}
+  - {output_target_id: output.genre.soundtracks_scores.greek, logical_playlist_id: genre.soundtracks_scores, variant_id: greek, display_name: Greek Soundtracks / Scores}
+  - {output_target_id: output.genre.soundtracks_scores.foreign, logical_playlist_id: genre.soundtracks_scores, variant_id: foreign, display_name: Foreign Soundtracks / Scores}
+  - {output_target_id: output.vibe.chill, logical_playlist_id: vibe.chill, display_name: Chill}
+  - {output_target_id: output.vibe.chill_instrumental, logical_playlist_id: vibe.chill_instrumental, display_name: Chill — Instrumental}
+  - {output_target_id: output.vibe.uplifting_feel_good, logical_playlist_id: vibe.uplifting_feel_good, display_name: Uplifting / Feel Good}
+  - {output_target_id: output.vibe.euphoric_energetic, logical_playlist_id: vibe.euphoric_energetic, display_name: Euphoric / Energetic}
+  - {output_target_id: output.vibe.hype, logical_playlist_id: vibe.hype, display_name: Hype}
+  - {output_target_id: output.vibe.motivational, logical_playlist_id: vibe.motivational, display_name: Motivational}
+  - {output_target_id: output.vibe.dark_sad_melancholic, logical_playlist_id: vibe.dark_sad_melancholic, display_name: Dark / Sad / Melancholic}
+  - {output_target_id: output.vibe.emotional_nostalgic, logical_playlist_id: vibe.emotional_nostalgic, display_name: Emotional / Nostalgic}
+  - {output_target_id: output.vibe.dreamy_atmospheric, logical_playlist_id: vibe.dreamy_atmospheric, display_name: Dreamy / Atmospheric}
+  - {output_target_id: output.vibe.romantic, logical_playlist_id: vibe.romantic, display_name: Romantic}
+  - {output_target_id: output.activity.driving, logical_playlist_id: activity.driving, display_name: Driving}
+  - {output_target_id: output.activity.night_driving, logical_playlist_id: activity.night_driving, display_name: Night Driving}
+  - {output_target_id: output.activity.gym, logical_playlist_id: activity.gym, display_name: Gym}
+  - {output_target_id: output.activity.running, logical_playlist_id: activity.running, display_name: Running}
+  - {output_target_id: output.activity.studying, logical_playlist_id: activity.studying, display_name: Studying}
+  - {output_target_id: output.activity.coding_focus, logical_playlist_id: activity.coding_focus, display_name: Coding / Focus}
+  - {output_target_id: output.activity.gaming, logical_playlist_id: activity.gaming, display_name: Gaming}
+  - {output_target_id: output.activity.background_music, logical_playlist_id: activity.background_music, display_name: Background Music}
+  - {output_target_id: output.activity.sleeping, logical_playlist_id: activity.sleeping, display_name: Sleeping}
+  - {output_target_id: output.activity.party, logical_playlist_id: activity.party, display_name: Party}
+  - {output_target_id: output.activity.road_trip, logical_playlist_id: activity.road_trip, display_name: Road Trip}

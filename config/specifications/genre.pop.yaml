@@ -1,0 +1,37 @@
+schema_version: "2"
+specification_version: spec.genre.pop.v1
+logical_playlist_id: genre.pop
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings grounded in recognizable Pop tradition, including legitimate hybrids, without treating accessibility or polish alone as proof.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent Pop tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [pop]}
+    rationale: Documented Pop lineage is the primary genre signal.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Concise vocal or electronic Pop arrangement
+    match: any
+    conditions:
+      - {characteristic_id: vocals_lyrics.vocal_style, operator: contains_any, values: [sung]}
+      - {characteristic_id: arrangement.acoustic_electronic_balance, operator: at_least, values: [balanced]}
+    rationale: These commonly support Pop evidence but cannot establish the genre alone.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Only adjacent broad traditions are evidenced
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [pop]}
+      - {characteristic_id: style.traditions, operator: contains_any, values: [rock, electronic, rhythm_and_blues, hip_hop]}
+    rationale: Accessibility within an adjacent tradition is not automatically Pop.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Use independent style evidence for crossover releases; do not infer Pop from chart success, popularity, or playlist context.]
+version_guidance: [Reassess remixes, acoustic versions, and covers independently when their stylistic grounding changes; remastering alone normally preserves genre evidence.]
+instrumental_vocal_guidance: [Instrumental Pop can qualify through style evidence; vocals are neither required nor conclusive.]
+overlap_refs: [genre.pop__genre.rock__genre.electronic, genre.rnb_soul__genre.pop__genre.hip_hop_rap]

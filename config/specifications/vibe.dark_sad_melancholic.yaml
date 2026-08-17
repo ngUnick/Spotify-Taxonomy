@@ -1,0 +1,39 @@
+schema_version: "2"
+specification_version: spec.vibe.dark_sad_melancholic.v1
+logical_playlist_id: vibe.dark_sad_melancholic
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings dominated by negative, sad, bleak, ominous, or melancholic emotional character.
+dimension_basis: subjective_character
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Dominant negative affect with dark or melancholic quality
+    match: all
+    conditions:
+      - {characteristic_id: affect_mood.valence, operator: at_most, values: [negative]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [sad, melancholic, bleak, ominous]}
+    rationale: The approved boundary requires dominant negative or dark character, not emotional intensity alone.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Dark atmosphere, tension, grief, or heartbreak
+    match: any
+    conditions:
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [dark, nocturnal]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [tense]}
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [grief, heartbreak]}
+    rationale: Sonic and lyrical evidence remain separate but may support the same Vibe.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Dominant joyful or strongly positive character
+    match: any
+    conditions:
+      - {characteristic_id: affect_mood.valence, operator: at_least, values: [positive]}
+      - {characteristic_id: affect_mood.qualities, operator: contains_any, values: [joyful, playful]}
+    rationale: Positive dominance conflicts with Dark/Sad/Melancholic, though mixed conflicts remain reviewable.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Poignancy or nostalgia without dominant negative character belongs only to Emotional/Nostalgic unless this specification is independently satisfied.]
+version_guidance: [Remixes, covers, and alternate arrangements must be reassessed because valence and atmosphere can change substantially.]
+instrumental_vocal_guidance: [Instrumentals may qualify through dominant sonic affect; sad lyrics alone are insufficient when the performed character is clearly positive.]
+overlap_refs: [vibe.dark_sad_melancholic__vibe.emotional_nostalgic, vibe.chill__vibe.dark_sad_melancholic, vibe.dark_sad_melancholic__vibe.emotional_nostalgic__vibe.romantic, activity.night_driving__vibe.chill__vibe.dark_sad_melancholic__vibe.dreamy_atmospheric]

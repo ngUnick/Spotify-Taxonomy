@@ -1,0 +1,38 @@
+schema_version: "2"
+specification_version: spec.genre.classical.v1
+logical_playlist_id: genre.classical
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings grounded in Western Classical composition or performance traditions across orchestral, chamber, choral, and solo forms.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent Western Classical tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [western_classical]}
+    rationale: Tradition and compositional context are primary; orchestral instrumentation alone is not proof.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Orchestral, chamber, or solo-classical arrangement
+    match: any
+    conditions:
+      - {characteristic_id: arrangement.orchestral_character, operator: at_least, values: [high]}
+      - {characteristic_id: arrangement.instrumentation, operator: contains_any, values: [orchestral, chamber, solo_instrument]}
+      - {characteristic_id: vocals_lyrics.vocal_style, operator: contains_any, values: [choral]}
+    rationale: These support documented Classical tradition but also occur in scores and hybrid works.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Cinematic orchestration without Classical tradition evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [western_classical]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [cinematic]}
+    rationale: Cinematic or orchestral sound alone does not establish Classical genre.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Contemporary classical, crossover, and score works may overlap when both tradition and work-context evidence are present.]
+version_guidance: [Different performances remain eligible when grounded in the same tradition, but electronic reworks and genre-shifting adaptations are assessed independently.]
+instrumental_vocal_guidance: [Instrumental, operatic, and choral works are eligible; ordinary vocal presence neither confirms nor excludes.]
+overlap_refs: [genre.soundtracks_scores__genre.style_overlap]

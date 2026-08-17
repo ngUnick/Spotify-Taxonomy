@@ -1,0 +1,38 @@
+schema_version: "2"
+specification_version: spec.genre.world_traditional.v1
+logical_playlist_id: genre.world_traditional
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Collect recordings with independently supported regional, traditional, folk, or culturally grounded musical lineage not captured merely by artist geography.
+dimension_basis: musical_style
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independent regional or traditional lineage evidence
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_any, values: [regional_traditional]}
+    rationale: Genuine tradition evidence is required; nationality and broad marketing labels are insufficient.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Traditional instrumentation or organic regional arrangement
+    match: any
+    conditions:
+      - {characteristic_id: arrangement.instrumentation, operator: contains_any, values: [traditional_regional, acoustic_strings]}
+      - {characteristic_id: atmosphere_space.qualities, operator: contains_any, values: [organic]}
+      - {characteristic_id: vocals_lyrics.themes, operator: contains_any, values: [storytelling]}
+    rationale: These can reinforce documented lineage but cannot substitute for it.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Modern regional Pop without traditional grounding
+    match: all
+    conditions:
+      - {characteristic_id: style.traditions, operator: contains_none, values: [regional_traditional]}
+      - {characteristic_id: style.traditions, operator: contains_any, values: [pop, electronic, latin]}
+    rationale: Region, language, or modern Latin identity does not automatically establish World/Traditional.
+hard_exclusions: []
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Use respectful evidence of tradition or cultural grounding; do not treat World as a residual bucket for unfamiliar music.]
+version_guidance: [Modern adaptations and remixes retain eligibility only when traditional lineage remains musically substantive and independently supported.]
+instrumental_vocal_guidance: [Both instrumental and vocal traditions qualify; language must not be used as a proxy for category.]
+overlap_refs: [genre.latin__genre.world_traditional, genre.soundtracks_scores__genre.style_overlap]

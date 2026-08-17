@@ -1,0 +1,45 @@
+schema_version: "2"
+specification_version: spec.vibe.chill_instrumental.v1
+logical_playlist_id: vibe.chill_instrumental
+status: reviewed
+characteristic_vocabulary_version: characteristics.v1
+purpose: Provide the nested instrumental-focused subset of Chill for relaxed, reflective, low-pressure recordings without ordinary lyrical lead vocals.
+dimension_basis: subjective_character
+strong_indicators:
+  - indicator_id: strong.001
+    summary: Independently relaxed low-pressure character and minimal lexical vocals
+    match: all
+    conditions:
+      - {characteristic_id: affect_mood.relaxation, operator: at_least, values: [high]}
+      - {characteristic_id: affect_mood.arousal, operator: at_most, values: [medium]}
+      - {characteristic_id: vocals_lyrics.vocal_presence, operator: one_of, values: [instrumental, non_lexical, sparse_samples]}
+    rationale: The recording must independently meet the broader relaxed, reflective Chill character before the instrumental tolerance is applied.
+supporting_indicators:
+  - indicator_id: supporting.001
+    summary: Gentle energy and low distraction
+    match: any
+    conditions:
+      - {characteristic_id: energy_dynamics.energy_level, operator: at_most, values: [medium]}
+      - {characteristic_id: structure_attention.distraction_risk, operator: at_most, values: [low]}
+      - {characteristic_id: atmosphere_space.atmospheric_prominence, operator: at_least, values: [medium]}
+    rationale: These strengthen the intended calm instrumental listening character but cannot replace independent Chill qualification.
+negative_indicators:
+  - indicator_id: negative.001
+    summary: Vocal material functions as ordinary lyrics
+    match: any
+    conditions:
+      - {characteristic_id: vocals_lyrics.vocal_presence, operator: one_of, values: [background, mixed]}
+    rationale: More than minimal lexical vocals weakens instrumental-focused suitability and should prompt review.
+hard_exclusions:
+  - indicator_id: exclusion.001
+    summary: Prominent ordinary lyrical lead vocals
+    match: all
+    conditions:
+      - {characteristic_id: vocals_lyrics.vocal_presence, operator: equals, values: [prominent_lead]}
+    rationale: The approved definition excludes ordinary lyrical lead vocals while allowing non-lexical and very sparse material.
+ambiguity_guidance:
+  insufficient_evidence: abstain
+  borderline_notes: [Instrumental, ambient, acoustic, score-like, sparse, dreamy, nostalgic, or melancholic form never establishes Chill by itself; disputed vocal function or pressure requires review.]
+version_guidance: [Instrumental mixes and remixes qualify only if that specific version also independently meets Chill criteria.]
+instrumental_vocal_guidance: [Allow fully instrumental music, non-lexical vocalization, and very sparse vocal samples; reject ordinary lyrical lead vocals.]
+overlap_refs: [vibe.chill__vibe.chill_instrumental]
