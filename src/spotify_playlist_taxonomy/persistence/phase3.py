@@ -754,15 +754,23 @@ class Phase3Store:
         return canonical_id
 
     def candidates(
-        self, binding_id: str, state: MatchCandidateState | None = None
+        self,
+        binding_id: str,
+        state: MatchCandidateState | None = None,
+        limit: int | None = None,
     ) -> tuple[MatchCandidate, ...]:
+        if limit is not None and not 1 <= limit <= 100:
+            raise ValueError("candidate limit must be between 1 and 100")
         state_clause = "AND state = ?" if state is not None else ""
+        limit_clause = "" if limit is None else "LIMIT ?"
         params: tuple[object, ...] = (
             (binding_id,) if state is None else (binding_id, state.value)
         )
+        if limit is not None:
+            params += (limit,)
         rows = self.connection.execute(
             f"SELECT * FROM canonical_match_candidates WHERE account_binding_id = ? "
-            f"{state_clause} ORDER BY created_at, candidate_id",
+            f"{state_clause} ORDER BY created_at, candidate_id {limit_clause}",
             params,
         )
         return tuple(self._candidate(row) for row in rows)
@@ -960,6 +968,18 @@ class Phase3Store:
             )
             for row in rows
         )
+
+    def linked_identity_ids_for_canonical(
+        self, binding_id: str, canonical_track_id: str
+    ) -> tuple[str, ...]:
+        self._require_active_binding(binding_id)
+        rows = self.connection.execute(
+            "SELECT identity_id FROM account_canonical_identity_links "
+            "WHERE account_binding_id = ? AND canonical_track_id = ? "
+            "ORDER BY identity_id",
+            (binding_id, canonical_track_id),
+        )
+        return tuple(str(row[0]) for row in rows)
 
     def _require_active_binding(
         self, binding_id: str, connection: sqlite3.Connection | None = None

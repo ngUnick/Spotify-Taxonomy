@@ -522,6 +522,43 @@ class MatchingTests(Phase3TestCase):
         self.assertEqual(1, sum(item.canonical_track_id is None for item in candidates))
         self.assertEqual(0, len(self.store.links(self.binding_id())))
 
+    def test_candidate_limit_follows_state_filter_and_preserves_order(self) -> None:
+        self.connection.execute(
+            "INSERT INTO canonical_tracks VALUES ('recording-a', 'Invented Song', '2026-01-01T00:00:00+00:00')"
+        )
+        self.connection.execute(
+            "INSERT INTO canonical_track_artists VALUES ('recording-a', 0, 'Synthetic Artist')"
+        )
+        self.connection.commit()
+        first_value = identity("limited-a")
+        second_value = identity("limited-b")
+        self.start("scan-limited", self.source_id, total=2)
+        self.stage(
+            "scan-limited",
+            (
+                StagedSourceEntry(0, 0, first_value),
+                StagedSourceEntry(1, 0, second_value),
+            ),
+            offset=2,
+        )
+        self.store.publish_scan("scan-limited", self.binding_id(), "snapshot-1")
+        first = first_value.identity_id
+        second = second_value.identity_id
+        self.reconcile(first, "a")
+        self.reconcile(second, "b")
+        all_ambiguous = self.store.candidates(
+            self.binding_id(), MatchCandidateState.AMBIGUOUS
+        )
+        limited = self.store.candidates(
+            self.binding_id(), MatchCandidateState.AMBIGUOUS, 1
+        )
+        self.assertEqual(2, len(all_ambiguous))
+        self.assertEqual((all_ambiguous[0],), limited)
+        with self.assertRaisesRegex(ValueError, "between 1 and 100"):
+            self.store.candidates(self.binding_id(), limit=0)
+        with self.assertRaisesRegex(ValueError, "between 1 and 100"):
+            self.store.candidates(self.binding_id(), limit=101)
+
     def test_rejection_is_idempotent_and_changed_evidence_can_repropose(self) -> None:
         identity_id = self.publish(identity("legacy"), "scan-legacy")
         self.reconcile(identity_id)

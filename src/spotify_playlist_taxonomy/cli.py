@@ -39,7 +39,11 @@ from spotify_playlist_taxonomy.config import (
     resolve_research_policy_path,
     taxonomy_digest,
 )
-from spotify_playlist_taxonomy.domain.ingestion import InboxKind, MatchCandidateState
+from spotify_playlist_taxonomy.domain.ingestion import (
+    InboxKind,
+    MatchCandidateAction,
+    MatchCandidateState,
+)
 from spotify_playlist_taxonomy.domain.models import AssignmentDecision, PlaylistRole
 from spotify_playlist_taxonomy.persistence import (
     BackupError,
@@ -905,13 +909,14 @@ def catalogue_identity_show(
 @catalogue_match_app.command("list")
 def catalogue_match_list(
     state: MatchCandidateState | None = typer.Option(None, "--state"),
+    limit: int | None = typer.Option(None, "--limit", min=1, max=100),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
     data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
 ) -> None:
     """List local matching candidates for explicit review."""
     try:
         with _phase3_store(config_path, data_dir) as (_, _, store):
-            candidates = _phase3_review(store).candidates(state)
+            candidates = _phase3_review(store).candidates(state, limit)
         for candidate in candidates:
             typer.echo(
                 f"{candidate.candidate_id}\t{candidate.identity_id}\t{candidate.action.value}\t"
@@ -931,9 +936,27 @@ def catalogue_match_show(
     """Show concise evidence for one account-scoped matching candidate."""
     try:
         with _phase3_store(config_path, data_dir) as (_, _, store):
-            value = _phase3_review(store).candidate(candidate_id)
+            review = _phase3_review(store)
+            value = review.candidate(candidate_id)
+            candidate = value.candidate
+            canonical_linked_identities = (
+                () if candidate.action is not MatchCandidateAction.LINK_EXISTING
+                else review.linked_identity_ids_for_canonical(
+                    candidate.canonical_track_id
+                )
+            )
+            open_peers = tuple(
+                peer for peer in review.identity(candidate.identity_id).candidates
+                if peer.candidate_id != candidate.candidate_id
+                and peer.state in {
+                    MatchCandidateState.CANDIDATE,
+                    MatchCandidateState.AMBIGUOUS,
+                    MatchCandidateState.USER_CONFIRMATION_REQUIRED,
+                }
+            )
         candidate = value.candidate
         _safe_echo(f"candidate_id: {candidate.candidate_id}")
+        _safe_echo(f"identity_id: {candidate.identity_id}")
         _safe_echo(f"state: {candidate.state.value}")
         _safe_echo(f"action: {candidate.action.value}")
         _safe_echo(f"identity: {value.identity.title} — {', '.join(value.identity.artists)}")
@@ -944,6 +967,16 @@ def catalogue_match_show(
             f"{', '.join(value.canonical.display_artists)}"
         )
         _safe_echo(f"basis: {', '.join(candidate.basis)}")
+        if candidate.action is MatchCandidateAction.LINK_EXISTING:
+            _safe_echo(
+                "canonical_linked_identities: "
+                f"{', '.join(canonical_linked_identities) or '-'}"
+            )
+        for peer in open_peers:
+            _safe_echo(
+                f"open_peer: {peer.candidate_id}\taction={peer.action.value}\t"
+                f"state={peer.state.value}\tcanonical={peer.canonical_track_id or '-'}"
+            )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
         _fail(error)
 

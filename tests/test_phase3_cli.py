@@ -10,9 +10,11 @@ from typer.testing import CliRunner
 from spotify_playlist_taxonomy.cli import _render_cli_text, _safe_echo, app
 from spotify_playlist_taxonomy.domain.ingestion import (
     CandidateReview,
+    IdentityReview,
     MatchCandidate,
     MatchCandidateAction,
     MatchCandidateState,
+    StagedSourceEntry,
 )
 from spotify_playlist_taxonomy.domain.models import (
     CanonicalTrack,
@@ -115,9 +117,26 @@ class Phase3CliTests(unittest.TestCase):
             display_title="Canonical Café 東京",
             display_artists=("Canonical Artist Ω", "Second Artist"),
         )
+        peer = MatchCandidate(
+            candidate_id="candidate.synthetic-create",
+            account_binding_id="binding-synthetic",
+            identity_id=identity.identity_id,
+            canonical_track_id=None,
+            action=MatchCandidateAction.CREATE_NEW,
+            state=MatchCandidateState.USER_CONFIRMATION_REQUIRED,
+            confidence=0.0,
+            basis=("preserve_distinct_recording_option",),
+            matcher_version="synthetic.v1",
+        )
         with patch("spotify_playlist_taxonomy.cli._phase3_review") as review_factory:
             review_factory.return_value.candidate.return_value = CandidateReview(
                 candidate, identity, canonical
+            )
+            review_factory.return_value.identity.return_value = IdentityReview(
+                identity, None, (candidate, peer)
+            )
+            review_factory.return_value.linked_identity_ids_for_canonical.return_value = (
+                "identity.synthetic.a", "identity.synthetic.b"
             )
             result = RUNNER.invoke(
                 app,
@@ -126,11 +145,21 @@ class Phase3CliTests(unittest.TestCase):
 
         self.assertEqual(0, result.exit_code, result.output)
         self.assertIn("state: ambiguous", result.output)
+        self.assertIn("identity_id: spotify.synthetic-review", result.output)
         self.assertIn("action: link_existing", result.output)
         self.assertIn("identity: Synthetic Café 東京 — Synthetic Artist Ω, Second Artist", result.output)
         self.assertIn("identity_version: acoustic", result.output)
         self.assertIn("canonical: Canonical Café 東京 — Canonical Artist Ω, Second Artist", result.output)
         self.assertIn("basis: normalized_title_artist_match_only", result.output)
+        self.assertIn(
+            "canonical_linked_identities: identity.synthetic.a, identity.synthetic.b",
+            result.output,
+        )
+        self.assertIn(
+            "open_peer: candidate.synthetic-create\taction=create_new\t"
+            "state=user_confirmation_required\tcanonical=-",
+            result.output,
+        )
         self.assertNotIn("synthetic-provider-track", result.output)
         self.assertNotIn("binding-synthetic", result.output)
 
@@ -157,6 +186,9 @@ class Phase3CliTests(unittest.TestCase):
             review_factory.return_value.candidate.return_value = CandidateReview(
                 candidate, identity, None
             )
+            review_factory.return_value.identity.return_value = IdentityReview(
+                identity, None, (candidate,)
+            )
             result = RUNNER.invoke(
                 app,
                 self.args("catalogue", "match", "show", candidate.candidate_id),
@@ -164,6 +196,7 @@ class Phase3CliTests(unittest.TestCase):
 
         self.assertEqual(0, result.exit_code, result.output)
         self.assertIn("state: user_confirmation_required", result.output)
+        self.assertIn("identity_id: spotify.synthetic-create", result.output)
         self.assertIn("action: create_new", result.output)
         self.assertIn("identity: Synthetic New Recording — Synthetic Artist", result.output)
         self.assertIn("identity_version: -", result.output)
@@ -171,6 +204,128 @@ class Phase3CliTests(unittest.TestCase):
         self.assertIn("basis: preserve_distinct_recording_option", result.output)
         self.assertNotIn("synthetic-create-track", result.output)
         self.assertNotIn("binding-synthetic", result.output)
+        self.assertNotIn("canonical_linked_identities:", result.output)
+
+    def test_match_show_loads_open_peers_before_its_store_closes(self) -> None:
+        database = self.data_dir / "state" / "app.db"
+        connection = connect_database(database)
+        apply_migrations(connection)
+        store = Phase3Store(connection)
+        binding = store.bind_account(
+            "binding.synthetic", "account.synthetic", "user.synthetic"
+        )
+        source = store.register_liked_source("source.synthetic", binding.binding_id)
+        identity = PlatformTrackIdentity(
+            identity_id="identity.synthetic-pair",
+            provider=IdentityProvider.SPOTIFY,
+            provider_track_id="provider.synthetic-pair",
+            title="Synthetic Pair",
+            artists=("Synthetic Artist",),
+        )
+        store.start_scan(
+            scan_id="scan.synthetic-pair", source_id=source.source_id,
+            binding_id=binding.binding_id, starting_snapshot_id=None,
+            starting_total=1, initial_page_signature=None, digest_version="synthetic.v1",
+        )
+        store.stage_page(
+            scan_id="scan.synthetic-pair", binding_id=binding.binding_id,
+            entries=(StagedSourceEntry(0, 0, identity),), next_cursor=None, next_offset=1,
+        )
+        store.publish_scan("scan.synthetic-pair", binding.binding_id, None)
+        connection.execute(
+            "INSERT INTO canonical_tracks VALUES ('canonical.synthetic-pair', 'Synthetic Pair', '2026-01-01T00:00:00+00:00')"
+        )
+        connection.execute(
+            "INSERT INTO canonical_track_artists VALUES ('canonical.synthetic-pair', 0, 'Synthetic Artist')"
+        )
+        connection.commit()
+        store.reconcile_published_identity(
+            binding.binding_id, identity.identity_id, matcher_version="synthetic.v1",
+            candidate_id="candidate.synthetic-link", canonical_id="canonical.unused",
+            link_id="link.unused", event_id="event.unused",
+        )
+        for ordinal, identity_id in enumerate((
+            "identity.synthetic-linked-b", "identity.synthetic-linked-a"
+        )):
+            linked_identity = PlatformTrackIdentity(
+                identity_id=identity_id,
+                provider=IdentityProvider.SPOTIFY,
+                provider_track_id=f"provider.synthetic-linked-{ordinal}",
+                title="Synthetic Pair",
+                artists=("Synthetic Artist",),
+            )
+            scan_id = f"scan.synthetic-linked-{ordinal}"
+            store.start_scan(
+                scan_id=scan_id, source_id=source.source_id,
+                binding_id=binding.binding_id, starting_snapshot_id=None,
+                starting_total=1, initial_page_signature=None, digest_version="synthetic.v1",
+            )
+            store.stage_page(
+                scan_id=scan_id, binding_id=binding.binding_id,
+                entries=(StagedSourceEntry(0, 0, linked_identity),),
+                next_cursor=None, next_offset=1,
+            )
+            store.publish_scan(scan_id, binding.binding_id, None)
+            store.reconcile_published_identity(
+                binding.binding_id, linked_identity.identity_id,
+                matcher_version="synthetic.v1", candidate_id=f"candidate.linked-{ordinal}",
+                canonical_id=f"canonical.unused-{ordinal}", link_id=f"link.unused-{ordinal}",
+                event_id=f"event.unused-{ordinal}",
+            )
+            linked_candidate = next(
+                item for item in store.candidates(binding.binding_id)
+                if item.identity_id == linked_identity.identity_id
+                and item.action is MatchCandidateAction.LINK_EXISTING
+            )
+            store.confirm_candidate(
+                binding.binding_id, linked_candidate.candidate_id,
+                canonical_id="canonical.synthetic-pair", create_new=False,
+                link_id=f"link.synthetic-{ordinal}", event_id=f"event.synthetic-{ordinal}",
+            )
+        link = next(
+            candidate for candidate in store.candidates(binding.binding_id)
+            if candidate.action is MatchCandidateAction.LINK_EXISTING
+        )
+        create_new = next(
+            candidate for candidate in store.candidates(binding.binding_id)
+            if candidate.action is MatchCandidateAction.CREATE_NEW
+        )
+        connection.close()
+
+        result = RUNNER.invoke(
+            app, self.args("catalogue", "match", "show", link.candidate_id)
+        )
+
+        self.assertEqual(0, result.exit_code, result.output)
+        self.assertIn("candidate_id: candidate.synthetic-link", result.output)
+        self.assertIn("identity_id: identity.synthetic-pair", result.output)
+        self.assertIn("action: link_existing", result.output)
+        self.assertIn(
+            "canonical_linked_identities: identity.synthetic-linked-a, "
+            "identity.synthetic-linked-b",
+            result.output,
+        )
+        self.assertIn(
+            f"open_peer: {create_new.candidate_id}\taction=create_new\t"
+            "state=user_confirmation_required\tcanonical=-",
+            result.output,
+        )
+
+    def test_match_list_passes_bounded_state_filtered_limit_and_rejects_invalid_limit(self) -> None:
+        with patch("spotify_playlist_taxonomy.cli._phase3_review") as review_factory:
+            review_factory.return_value.candidates.return_value = ()
+            result = RUNNER.invoke(
+                app,
+                self.args("catalogue", "match", "list", "--state", "ambiguous", "--limit", "25"),
+            )
+        self.assertEqual(0, result.exit_code, result.output)
+        review_factory.return_value.candidates.assert_called_once_with(
+            MatchCandidateState.AMBIGUOUS, 25
+        )
+        invalid = RUNNER.invoke(
+            app, self.args("catalogue", "match", "list", "--limit", "0")
+        )
+        self.assertNotEqual(0, invalid.exit_code)
 
     def test_unicode_metadata_renders_unchanged_on_utf8_output(self) -> None:
         original = "Synthetic 💯 — Ελληνικά — Café — 東京"

@@ -138,7 +138,14 @@ synchronization exists.
 `cycle status` is a local-only, deterministic operational report. It is safe to schedule externally because
 it performs no provider I/O or mutation, but V1 does not schedule ingestion: selected source scans, research
 with `--network`, Codex exchange, review, provisioning, and one-track population remain explicit operator
-actions. Logout removes protected credentials only; unbind requires sources disabled and preserves history.
+actions. Its incomplete-ingestion category reports only incomplete scans for active sources; disabled-source
+scan history remains persisted for audit without appearing as current actionable work. Logout removes protected
+credentials only; unbind requires sources disabled and preserves history.
+
+For canonical match review, use `catalogue match list --state ambiguous --limit 25`, inspect one row with
+`catalogue match show CANDIDATE_ID`, then explicitly choose either `confirm-existing` for that candidate or
+`confirm-new` using the displayed open-peer candidate ID. Confirmation resolves that identity and supersedes
+its open peers; no bulk matching authority exists.
 The deferred real Phase 11 addition remains deferred until a genuine desired membership exists.
 
 ## Future, separately approved

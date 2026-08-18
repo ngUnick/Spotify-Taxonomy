@@ -35,15 +35,22 @@ class Phase3ReviewService:
         return self.store.identity_review(self.binding_id, identity_id)
 
     def candidates(
-        self, state: MatchCandidateState | None = None
+        self, state: MatchCandidateState | None = None, limit: int | None = None
     ) -> tuple[MatchCandidate, ...]:
-        return self.store.candidates(self.binding_id, state)
+        return self.store.candidates(self.binding_id, state, limit)
 
     def candidate(self, candidate_id: str) -> CandidateReview:
         return self.store.candidate_review(self.binding_id, candidate_id)
 
     def links(self) -> tuple[LinkReview, ...]:
         return self.store.links(self.binding_id)
+
+    def linked_identity_ids_for_canonical(
+        self, canonical_track_id: str
+    ) -> tuple[str, ...]:
+        return self.store.linked_identity_ids_for_canonical(
+            self.binding_id, canonical_track_id
+        )
 
     def confirm_existing(self, candidate_id: str, canonical_id: str) -> None:
         self.store.confirm_candidate(
