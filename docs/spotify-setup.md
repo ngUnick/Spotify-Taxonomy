@@ -76,3 +76,10 @@ Spotify mutation endpoint. The application requests no modify scope and has no S
 Phase 3 Checkpoint B observed canonical nested `item` across the complete 48-entry controlled playlist and
 no legacy `track` variant. The compatibility fallback was removed; canonical `item` is authoritative, and
 the deprecated `/playlists/{id}/tracks` endpoint remains prohibited.
+## Phase 11 managed population authorization
+
+`spotify auth login --managed-population` explicitly requests the two playlist modification scopes needed
+by the guarded one-track population pilot. Ordinary Phase 10 provisioning still requests only
+`playlist-modify-private`. Provider `public` is not ownership evidence; Phase 11 uses it only to fail
+closed when the operational item-add scope is absent. Population accepts no arbitrary playlist ID and has
+no removal, replacement, or reorder operation.

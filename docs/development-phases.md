@@ -3,7 +3,7 @@
 Each phase ends with tests, exact status/diff, unresolved decisions, and explicit user approval. Work stops
 at every checkpoint. A phase number does not itself authorize service access or external mutations.
 
-Current roadmap status: **PHASES 0–9 COMPLETE. PHASE 10 NOT STARTED.**
+Current roadmap status: **PHASES 0–11 COMPLETE. PHASE 12 NOT STARTED.**
 
 ## Phase 0 — policy baseline, architecture, skeleton and invariants (complete)
 
@@ -126,8 +126,12 @@ recognizes only policy-confirmed targets, without requiring any specific provide
 
 ## Phase 11 — guarded addition-only population
 
-Add approved missing items with configurable bounded batches, deduplication, 429/quota/partial-failure and
-ambiguous-result reconciliation, verification, and journaling. No destructive mutation.
+Append only one explicitly selected canonical track to one exact policy-confirmed managed target per
+invocation. Apply recomputes desired state, resolves one existing Spotify mapping without title/artist
+matching, validates the exact destination, and reads full membership before adding. `ADD:<target>:<canonical>`
+is required. Existing or explicitly relinked membership is a no-op. Ambiguous outcomes require read-only
+recovery verification; no retry, removal, replacement, reorder, bulk/background population, or Phase 12
+synchronization exists.
 
 ## Phase 12 — periodic inbox processing / V1 hardening
 

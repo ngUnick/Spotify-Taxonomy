@@ -103,7 +103,7 @@ class SpotifyReadOnlyAdapter:
                 "limit": PAGE_SIZE,
                 "offset": offset,
                 "fields": (
-                    "items(is_local,item(id,name,type,is_local,artists(name))),"
+                    "items(is_local,item(id,linked_from(id),name,type,is_local,artists(name))),"
                     "next,offset,limit,total"
                 ),
             },
@@ -327,6 +327,15 @@ def _parse_track(value: object, index: int, *, wrapper_local: object) -> _Parsed
         if not isinstance(name, str) or not name.strip():
             return _ParsedTrack(None, PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
         artist_names.append(name)
+    linked_from = value.get("linked_from")
+    linked_from_id: str | None = None
+    if linked_from is not None:
+        if not isinstance(linked_from, dict):
+            return _ParsedTrack(None, PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
+        candidate = linked_from.get("id")
+        if not isinstance(candidate, str) or not candidate:
+            return _ParsedTrack(None, PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
+        linked_from_id = candidate
     return _ParsedTrack(
         PlatformTrackIdentity(
             identity_id=f"spotify:{track_id}",
@@ -334,6 +343,7 @@ def _parse_track(value: object, index: int, *, wrapper_local: object) -> _Parsed
             provider_track_id=track_id,
             title=title,
             artists=tuple(artist_names),
+            linked_from_provider_track_id=linked_from_id,
         ),
         None,
     )

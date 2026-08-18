@@ -99,6 +99,12 @@ whether dispatch/acknowledgement is known, and the exact-ID read-back publicatio
 does not alter or infer facts for historical attempts, and stores no request URL, identifier, header, token,
 or response body.
 
+Migration 14 adds `managed_target_addition_attempts` for Phase 11's one-target/one-canonical addition
+pilot. It records only local identity and registration references, confirmation, bounded dispatch/read-back
+facts, lifecycle outcome, and timestamps. A committed `started` or `recovery_required` row blocks an
+automatic retry after an uncertain provider addition. It stores no provider response, URI, snapshot, token,
+or playlist-content copy.
+
 ## Phase 5 research state
 
 Migration 5 adds `research_jobs`, `research_provider_attempts`, `research_provider_assertions`, and

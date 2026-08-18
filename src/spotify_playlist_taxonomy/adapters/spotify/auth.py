@@ -34,6 +34,7 @@ REQUIRED_SCOPES = (
     "user-library-read",
 )
 PROVISIONING_SCOPE = "playlist-modify-private"
+POPULATION_SCOPES = (PROVISIONING_SCOPE, "playlist-modify-public")
 REFRESH_EARLY_SECONDS = 60
 
 
@@ -117,7 +118,7 @@ class SpotifyAuthManager:
             return AuthorizationStatus(authorized=False)
         return AuthorizationStatus(True, stored.scopes, stored.authorized_at)
 
-    def login(self, *, no_browser: bool = False, managed_provisioning: bool = False) -> AccessToken:
+    def login(self, *, no_browser: bool = False, managed_provisioning: bool = False, managed_population: bool = False) -> AccessToken:
         callback = self._callback_factory(self._callback_port)
         state: str | None = None
         verifier: str | None = None
@@ -130,7 +131,9 @@ class SpotifyAuthManager:
             verifier = secrets.token_urlsafe(64)
             challenge = _pkce_challenge(verifier)
             redirect_uri = callback.redirect_uri
-            requested_scopes = REQUIRED_SCOPES + ((PROVISIONING_SCOPE,) if managed_provisioning else ())
+            if managed_provisioning and managed_population:
+                raise SpotifyAdapterError(SpotifyErrorKind.CONFIGURATION, "choose one managed authorization mode")
+            requested_scopes = REQUIRED_SCOPES + (POPULATION_SCOPES if managed_population else ((PROVISIONING_SCOPE,) if managed_provisioning else ()))
             authorization_url = _authorization_url(self._client_id, redirect_uri, state, challenge, requested_scopes)
             if no_browser:
                 self._authorization_url_sink(authorization_url)

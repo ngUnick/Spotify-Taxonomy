@@ -23,7 +23,9 @@ from spotify_playlist_taxonomy.adapters.spotify import (
     mask_identifier,
     resolve_client_id,
     PROVISIONING_SCOPE,
+    POPULATION_SCOPES,
     SpotifyManagedPlaylistProvisioner,
+    SpotifyManagedTrackAdder,
 )
 from spotify_playlist_taxonomy.config import (
     ApplicationConfig,
@@ -71,6 +73,7 @@ from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
 from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 from spotify_playlist_taxonomy.workflows.phase10 import Phase10Service, ProvisioningError, RecoveryRequiredError
+from spotify_playlist_taxonomy.workflows.phase11 import Phase11Service, PopulationError, PopulationRecoveryRequired
 
 DEFAULT_CONFIG_PATH = Path("config/application.yaml")
 
@@ -100,6 +103,8 @@ sync_app = typer.Typer(no_args_is_help=True, help="Build local read-only synchro
 managed_app = typer.Typer(no_args_is_help=True, help="Provision one registered non-collaborative managed playlist at a time.")
 managed_provision_app = typer.Typer(no_args_is_help=True, help="Preview or explicitly apply managed playlist provisioning.")
 managed_recovery_app = typer.Typer(no_args_is_help=True, help="Explicitly preserve and abandon unknown provisioning attempts.")
+populate_app = typer.Typer(no_args_is_help=True, help="Guarded one-track addition to an exact managed playlist.")
+populate_recovery_app = typer.Typer(no_args_is_help=True, help="Read-only verification of unresolved managed additions.")
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(database_app, name="db")
@@ -125,6 +130,8 @@ app.add_typer(sync_app, name="sync")
 app.add_typer(managed_app, name="managed")
 managed_app.add_typer(managed_provision_app, name="provision")
 managed_app.add_typer(managed_recovery_app, name="recovery")
+app.add_typer(populate_app, name="populate")
+populate_app.add_typer(populate_recovery_app, name="recovery")
 
 
 def _load_documents(config_path: Path) -> tuple[ApplicationConfig, TaxonomyDocument, Path]:
@@ -341,6 +348,17 @@ def _phase10_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase
         yield Phase10Service(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
+@contextmanager
+def _phase11_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase11Service]:
+    config_path = config_path.resolve(); config, _, _ = _load_documents(config_path); paths = _paths(config, data_dir)
+    if not paths.database_path.is_file(): raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 14: raise PersistenceError("database requires migration 14; run 'db init'")
+        yield Phase11Service(connection, load_phase4_bundle(config_path))
+    finally: connection.close()
+
 
 @app.callback()
 def root(
@@ -546,6 +564,7 @@ def spotify_auth_login(
     ),
     no_browser: bool = typer.Option(False, "--no-browser"),
     managed_provisioning: bool = typer.Option(False, "--managed-provisioning", help="Request the private managed-playlist provisioning scope."),
+    managed_population: bool = typer.Option(False, "--managed-population", help="Explicitly request managed population scopes."),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
 ) -> None:
     """Authorize with PKCE; the full URL is printed only with --no-browser."""
@@ -560,7 +579,12 @@ def spotify_auth_login(
                 callback_port=callback_port,
                 authorization_url_sink=typer.echo,
             )
-            token = manager.login(no_browser=no_browser, managed_provisioning=True) if managed_provisioning else manager.login(no_browser=no_browser)
+            if managed_population:
+                token = manager.login(no_browser=no_browser, managed_population=True)
+            elif managed_provisioning:
+                token = manager.login(no_browser=no_browser, managed_provisioning=True)
+            else:
+                token = manager.login(no_browser=no_browser)
         typer.echo(f"Authorized: client_id={mask_identifier(resolved)}")
         typer.echo(f"scopes: {' '.join(token.scopes)}")
     except (OSError, ValueError, ValidationError, SpotifyAdapterError) as error:
@@ -1392,3 +1416,61 @@ def managed_recovery_abandon(target_id: str = typer.Argument(...), confirmation:
             status = service.abandon_unknown(target_id, confirmation)
         _safe_echo(f"target={status.output_target_id}\tstate={status.state}\treason={status.reason}")
     except (OSError, ValueError, ValidationError, PersistenceError, ProvisioningError) as error: _fail(error)
+
+
+def _population_context(config_path: Path, client_id: str | None) -> tuple[ApplicationConfig, str]:
+    config, _, _ = _load_documents(config_path)
+    return config, resolve_client_id(client_id)
+
+
+def _populate_operation(service: Phase11Service, target_id: str, canonical_id: str, resolved: str, config: ApplicationConfig, *, apply: bool, confirmation: str = "", recovery: bool = False):
+    with _spotify_http_client(config) as http_client:
+        manager = _spotify_auth_manager(config, resolved, http_client)
+        reader = SpotifyReadOnlyAdapter(token_provider=manager, http_client=http_client, max_read_attempts=config.spotify.max_read_attempts)
+        account = reader.read_current_account()
+        binding = service.connection.execute("SELECT binding_id FROM platform_account_bindings WHERE active=1").fetchone()
+        kwargs = {"account_binding_id": None if binding is None else binding["binding_id"], "account_id": account.account_id, "scopes": manager.status().scopes, "reader": reader}
+        if recovery:
+            return service.recover_verify(target_id, canonical_id, confirmation, **kwargs)
+        if apply:
+            return service.apply(target_id, canonical_id, confirmation, adder=SpotifyManagedTrackAdder(token_provider=manager, http_client=http_client), **kwargs)
+        return service.preview(target_id, canonical_id, **kwargs)
+
+
+@populate_app.command("status")
+def populate_status(target_id: str = typer.Argument(...), canonical_id: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Show local addition-attempt state only; no provider call is made."""
+    try:
+        with _phase11_service(config_path, data_dir) as service: result = service.status(target_id, canonical_id)
+        _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count={result.membership_count if result.membership_count is not None else '-'}\treason={result.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError, PopulationError) as error: _fail(error)
+
+
+@populate_app.command("preview")
+def populate_preview(target_id: str = typer.Argument(...), canonical_id: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Read exact managed state for one potential addition; never writes."""
+    try:
+        config, resolved = _population_context(config_path, client_id)
+        with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=False)
+        _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count={result.membership_count if result.membership_count is not None else '-'}\trequired_scopes={' '.join(result.required_scopes) or '-'}\treason={result.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError) as error: _fail(error)
+
+
+@populate_app.command("apply")
+def populate_apply(target_id: str = typer.Argument(...), canonical_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Append exactly one confirmed desired track to its exact managed destination."""
+    try:
+        config, resolved = _population_context(config_path, client_id)
+        with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=True, confirmation=confirmation)
+        _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count={result.membership_count if result.membership_count is not None else '-'}\treason={result.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError, PopulationRecoveryRequired) as error: _fail(error)
+
+
+@populate_recovery_app.command("verify")
+def populate_recovery_verify(target_id: str = typer.Argument(...), canonical_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Read-only verification of an unresolved one-track managed addition."""
+    try:
+        config, resolved = _population_context(config_path, client_id)
+        with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=False, confirmation=confirmation, recovery=True)
+        _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count={result.membership_count if result.membership_count is not None else '-'}\treason={result.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError) as error: _fail(error)

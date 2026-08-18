@@ -153,6 +153,7 @@ class PlatformTrackIdentity:
     artists: tuple[str, ...]
     provider_track_id: str | None = None
     version_label: str | None = None
+    linked_from_provider_track_id: str | None = None
 
     def __post_init__(self) -> None:
         _validate_nonblank("identity_id", self.identity_id)
@@ -162,6 +163,8 @@ class PlatformTrackIdentity:
             _validate_nonblank("provider_track_id", self.provider_track_id)
         if self.version_label is not None:
             _validate_nonblank("version_label", self.version_label)
+        if self.linked_from_provider_track_id is not None:
+            _validate_nonblank("linked_from_provider_track_id", self.linked_from_provider_track_id)
 
 
 @dataclass(frozen=True, slots=True)

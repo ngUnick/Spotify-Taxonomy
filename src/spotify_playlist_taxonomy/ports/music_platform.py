@@ -124,13 +124,6 @@ class PlaylistSummaryPage:
 PlaylistPage = TrackIdentityPage
 
 
-@dataclass(frozen=True, slots=True)
-class PlannedMutation:
-    operation_id: str
-    target_playlist_id: str
-    item_ids: tuple[str, ...]
-
-
 class MusicPlatformReader(Protocol):
     def read_current_account(self) -> PlatformAccountIdentity: ...
 
@@ -145,11 +138,3 @@ class MusicPlatformReader(Protocol):
     ) -> TrackIdentityPage: ...
 
     def read_saved_tracks(self, cursor: str | None = None) -> TrackIdentityPage: ...
-
-
-class GuardedMusicPlatformWriter(Protocol):
-    """Only an approved guarded executor may implement and receive this port."""
-
-    def create_managed_playlist(self, operation: PlannedMutation) -> str: ...
-
-    def add_items(self, operation: PlannedMutation) -> str | None: ...

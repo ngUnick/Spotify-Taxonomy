@@ -1,7 +1,7 @@
 """Spotify PKCE and read-only Web API adapter."""
 
 from .auth import (
-    REQUIRED_SCOPES,
+    REQUIRED_SCOPES, POPULATION_SCOPES,
     AccessToken,
     SpotifyAuthManager,
     mask_identifier,
@@ -14,6 +14,7 @@ from .provisioning import (
     MANAGED_DESCRIPTION, PROVISIONING_SCOPE, SpotifyManagedPlaylistPolicyMismatch,
     SpotifyManagedPlaylistProvisioner,
 )
+from .population import SpotifyManagedTrackAdder
 
 __all__ = [
     "REQUIRED_SCOPES", "AccessToken", "SpotifyAdapterError", "SpotifyAuthManager",
@@ -22,4 +23,5 @@ __all__ = [
     "resolve_client_id", "MANAGED_DESCRIPTION", "PROVISIONING_SCOPE",
     "SpotifyManagedPlaylistProvisioner",
     "SpotifyManagedPlaylistPolicyMismatch",
+    "POPULATION_SCOPES", "SpotifyManagedTrackAdder",
 ]
