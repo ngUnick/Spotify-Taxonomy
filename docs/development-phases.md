@@ -135,8 +135,11 @@ synchronization exists.
 
 ## Phase 12 — periodic inbox processing / V1 hardening
 
-Provide the manually invoked end-to-end workflow with resumability, history, backup/recovery, and explicit
-review/approval boundaries. Leave Liked Songs and Shazam entries intact.
+`cycle status` is a local-only, deterministic operational report. It is safe to schedule externally because
+it performs no provider I/O or mutation, but V1 does not schedule ingestion: selected source scans, research
+with `--network`, Codex exchange, review, provisioning, and one-track population remain explicit operator
+actions. Logout removes protected credentials only; unbind requires sources disabled and preserves history.
+The deferred real Phase 11 addition remains deferred until a genuine desired membership exists.
 
 ## Future, separately approved
 

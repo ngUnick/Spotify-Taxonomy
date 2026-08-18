@@ -74,6 +74,7 @@ from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
 from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 from spotify_playlist_taxonomy.workflows.phase10 import Phase10Service, ProvisioningError, RecoveryRequiredError
 from spotify_playlist_taxonomy.workflows.phase11 import Phase11Service, PopulationError, PopulationRecoveryRequired
+from spotify_playlist_taxonomy.workflows.phase12 import Phase12Service
 
 DEFAULT_CONFIG_PATH = Path("config/application.yaml")
 
@@ -105,6 +106,7 @@ managed_provision_app = typer.Typer(no_args_is_help=True, help="Preview or expli
 managed_recovery_app = typer.Typer(no_args_is_help=True, help="Explicitly preserve and abandon unknown provisioning attempts.")
 populate_app = typer.Typer(no_args_is_help=True, help="Guarded one-track addition to an exact managed playlist.")
 populate_recovery_app = typer.Typer(no_args_is_help=True, help="Read-only verification of unresolved managed additions.")
+cycle_app = typer.Typer(no_args_is_help=True, help="Local-only V1 operational status.")
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(database_app, name="db")
@@ -132,6 +134,7 @@ managed_app.add_typer(managed_provision_app, name="provision")
 managed_app.add_typer(managed_recovery_app, name="recovery")
 app.add_typer(populate_app, name="populate")
 populate_app.add_typer(populate_recovery_app, name="recovery")
+app.add_typer(cycle_app, name="cycle")
 
 
 def _load_documents(config_path: Path) -> tuple[ApplicationConfig, TaxonomyDocument, Path]:
@@ -357,6 +360,17 @@ def _phase11_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase
         assert_integrity(connection)
         if current_schema_version(connection) < 14: raise PersistenceError("database requires migration 14; run 'db init'")
         yield Phase11Service(connection, load_phase4_bundle(config_path))
+    finally: connection.close()
+
+@contextmanager
+def _phase12_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase12Service]:
+    config_path = config_path.resolve(); config, _, _ = _load_documents(config_path); paths = _paths(config, data_dir)
+    if not paths.database_path.is_file(): raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 14: raise PersistenceError("database requires migration 14; run 'db init'")
+        yield Phase12Service(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
 
@@ -1474,3 +1488,20 @@ def populate_recovery_verify(target_id: str = typer.Argument(...), canonical_id:
         with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=False, confirmation=confirmation, recovery=True)
         _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count={result.membership_count if result.membership_count is not None else '-'}\treason={result.reason}")
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError) as error: _fail(error)
+
+
+@cycle_app.command("status")
+def cycle_status(limit: int = typer.Option(10, "--limit", min=1, max=100), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Local-only aggregate status; never contacts a provider or changes state."""
+    try:
+        with _phase12_service(config_path, data_dir) as service: report = service.status(limit)
+        try:
+            config, _, _ = _load_documents(config_path); resolved = resolve_client_id(client_id)
+            with _spotify_http_client(config) as http_client: auth = _spotify_auth_manager(config, resolved, http_client).status()
+            scopes = set(auth.scopes); missing = ",".join(sorted(set(POPULATION_SCOPES) - scopes)) if auth.authorized else "authorization_absent"
+            auth_line = f"locally_authorized={auth.authorized}\tstored_scopes={','.join(auth.scopes) or '-'}\tpopulation_scopes_missing={missing or '-'}"
+        except (SpotifyAdapterError, ValueError):
+            auth_line = "locally_authorized=not_inspected\tstored_scopes=-\tpopulation_scopes_missing=unknown"
+        _safe_echo(f"account={report.account_state}\tlive_validity_not_checked\t{auth_line}")
+        for item in report.categories: _safe_echo(f"{item.name}\tcount={item.count}\tids={','.join(item.identifiers) or '-'}")
+    except (OSError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
