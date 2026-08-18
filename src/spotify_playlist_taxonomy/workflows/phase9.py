@@ -118,7 +118,8 @@ class Phase9Service:
     ) -> tuple[DryRunPlanEntry, ...]:
         if not canonical_track_ids or len(canonical_track_ids) > 25 or len(set(canonical_track_ids)) != len(canonical_track_ids):
             raise ValueError("plan requires 1-25 distinct explicit canonical IDs")
-        snapshots = {item.output_target_id: item for item in current_targets}
+        supplied = current_targets or self._registered_target_snapshots()
+        snapshots = {item.output_target_id: item for item in supplied}
         entries: list[DryRunPlanEntry] = []
         for canonical_id in canonical_track_ids:
             desired = self.desired(canonical_id)
@@ -139,6 +140,20 @@ class Phase9Service:
                 if snapshot.authoritative and canonical_id in snapshot.canonical_track_ids and target_id not in desired_targets:
                     entries.append(DryRunPlanEntry(canonical_id, target_id, DryRunOutcome.PRESENT_NOT_DESIRED, "present on a managed target but no removal is planned"))
         return tuple(entries)
+
+    def _registered_target_snapshots(self) -> tuple[ManagedTargetSnapshot, ...]:
+        """Recognize durable Phase 10 mappings without pretending membership was read."""
+        try:
+            rows = self.connection.execute(
+                "SELECT output_target_id FROM managed_target_registrations WHERE state='active' AND policy_confirmed=1 "
+                "ORDER BY output_target_id"
+            )
+        except sqlite3.OperationalError:
+            return ()
+        return tuple(
+            ManagedTargetSnapshot(row["output_target_id"], frozenset(), authoritative=False)
+            for row in rows
+        )
 
     def _route_genre(self, canonical_track_id: str) -> tuple[RoutingOutcome, str]:
         values = self._routing_values(canonical_track_id)

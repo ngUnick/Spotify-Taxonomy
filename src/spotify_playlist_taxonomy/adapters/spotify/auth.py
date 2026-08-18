@@ -33,6 +33,7 @@ REQUIRED_SCOPES = (
     "playlist-read-collaborative",
     "user-library-read",
 )
+PROVISIONING_SCOPE = "playlist-modify-private"
 REFRESH_EARLY_SECONDS = 60
 
 
@@ -116,7 +117,7 @@ class SpotifyAuthManager:
             return AuthorizationStatus(authorized=False)
         return AuthorizationStatus(True, stored.scopes, stored.authorized_at)
 
-    def login(self, *, no_browser: bool = False) -> AccessToken:
+    def login(self, *, no_browser: bool = False, managed_provisioning: bool = False) -> AccessToken:
         callback = self._callback_factory(self._callback_port)
         state: str | None = None
         verifier: str | None = None
@@ -129,7 +130,8 @@ class SpotifyAuthManager:
             verifier = secrets.token_urlsafe(64)
             challenge = _pkce_challenge(verifier)
             redirect_uri = callback.redirect_uri
-            authorization_url = _authorization_url(self._client_id, redirect_uri, state, challenge)
+            requested_scopes = REQUIRED_SCOPES + ((PROVISIONING_SCOPE,) if managed_provisioning else ())
+            authorization_url = _authorization_url(self._client_id, redirect_uri, state, challenge, requested_scopes)
             if no_browser:
                 self._authorization_url_sink(authorization_url)
             elif not self._browser_open(authorization_url):
@@ -165,13 +167,13 @@ class SpotifyAuthManager:
                 }
             )
             access, refresh_token = self._parse_token_payload(
-                payload, default_scopes=REQUIRED_SCOPES, require_refresh_token=True
+                payload, default_scopes=requested_scopes, require_refresh_token=True
             )
-            missing = set(REQUIRED_SCOPES) - set(access.scopes)
+            missing = set(requested_scopes) - set(access.scopes)
             if missing:
                 raise SpotifyAdapterError(
                     SpotifyErrorKind.AUTHORIZATION_FAILED,
-                    "Spotify did not grant all required read scopes",
+                    "Spotify did not grant all requested scopes",
                 )
             self._warn_extra_scopes(access.scopes)
             self._credentials.save(
@@ -332,7 +334,7 @@ def _pkce_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
-def _authorization_url(client_id: str, redirect_uri: str, state: str, challenge: str) -> str:
+def _authorization_url(client_id: str, redirect_uri: str, state: str, challenge: str, scopes: tuple[str, ...] = REQUIRED_SCOPES) -> str:
     query = urlencode(
         {
             "client_id": client_id,
@@ -341,7 +343,7 @@ def _authorization_url(client_id: str, redirect_uri: str, state: str, challenge:
             "state": state,
             "code_challenge_method": "S256",
             "code_challenge": challenge,
-            "scope": " ".join(REQUIRED_SCOPES),
+            "scope": " ".join(scopes),
         }
     )
     return f"{AUTHORIZE_URL}?{query}"

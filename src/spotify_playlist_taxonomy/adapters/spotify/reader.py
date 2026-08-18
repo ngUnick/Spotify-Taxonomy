@@ -88,7 +88,7 @@ class SpotifyReadOnlyAdapter:
         _validate_playlist_id(playlist_id)
         payload = self._get(
             f"/playlists/{playlist_id}",
-            {"fields": "id,name,owner(id),collaborative,public,snapshot_id,items(total)"},
+            {"fields": "id,name,description,owner(id),collaborative,public,snapshot_id,items(total)"},
         )
         return _parse_playlist_summary(payload)
 
@@ -266,6 +266,9 @@ def _parse_playlist_summary(value: object) -> PlatformPlaylistSummary:
     snapshot = value.get("snapshot_id")
     if snapshot is not None and (not isinstance(snapshot, str) or not snapshot):
         raise _invalid_response()
+    description = value.get("description")
+    if description is not None and not isinstance(description, str):
+        raise _invalid_response()
     item_count: int | None = None
     if "items" in value and value["items"] is not None:
         item_summary = value["items"]
@@ -283,6 +286,7 @@ def _parse_playlist_summary(value: object) -> PlatformPlaylistSummary:
         public=public,
         item_count=item_count,
         snapshot_id=snapshot,
+        description=description,
     )
 
 

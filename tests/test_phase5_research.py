@@ -358,7 +358,7 @@ class Phase5ResearchTests(unittest.TestCase):
         )
         connection.commit()
         self.assertEqual(4, current_schema_version(connection))
-        self.assertEqual(8, apply_migrations(connection))
+        self.assertEqual(13, apply_migrations(connection))
         row = connection.execute(
             "SELECT normalized_value, provider_id, evidence_state FROM research_evidence"
         ).fetchone()

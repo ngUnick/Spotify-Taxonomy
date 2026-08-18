@@ -94,8 +94,35 @@ actions without introducing a review decision or any Spotify write.
 
 ## Phase 10 — managed-playlist provisioning pilot
 
-Reverify API/policy and create one approved empty managed playlist with reliable ambiguous-creation
-reconciliation selected during the phase; do not mandate a user-visible operational marker in advance.
+Phase 10 provisions at most one explicitly selected concrete output target at a time. A durable local
+registration binds its stable `output_target_id` to the exact Spotify playlist identity and active account
+binding; names and descriptions are never used for adoption or recovery. Creation sends the best-effort
+preference `public=false`, requires non-collaborative provider state, and uses exactly the informational
+description `Managed by Spotify Taxonomy.`
+The opt-in authorization command requests only `playlist-modify-private`; no public modification scope is
+requested. Preview is local and write-free. Apply requires the exact target ID as confirmation, verifies the
+bound account before creation, creates the empty playlist, then records its returned identity. A repeated
+active target is idempotent. Any ambiguous remote/local partial success is `recovery_required` and cannot be
+automatically retried, adopted, recreated, or deleted. This phase has no population, removal, rename, edit,
+or generic playlist-mutation capability. Phase 9 can recognize an active registration but remains
+`out_of_scope` until a future authoritative managed-membership read exists.
+
+An unknown `recovery_required` result remains blocked until a human explicitly runs `managed recovery
+abandon <target-id> ABANDON-UNKNOWN:<target-id>`. That local-only action preserves the unresolved attempt
+as `abandoned_unknown`; it neither asserts remote failure nor adopts/searches for a playlist. It performs no
+Spotify write, deletion, or cleanup, and it never retries automatically. Normal provisioning may only be
+previewed or later applied again through its separate existing safeguards.
+
+The provider-observed `public` flag is informational only: it is neither ownership evidence nor an
+authoritative proxy for profile publication or Spotify-client access privacy. Creation still sends
+`public=false` and `collaborative=false` explicitly. Exact-ID verification requires matching identity,
+owner/account binding, and `collaborative=false`; it retains `public` as bounded diagnostic metadata.
+A collaborative provider response remains fail-closed. Earlier active registrations are policy-unconfirmed
+until an exact-ID verification confirms the authoritative conditions.
+
+`managed verify` reads only the exact durable registration identity and reports bounded public/collaboration
+metadata. No policy-repair command is exposed: the historical repair journal remains for audit only. Phase 9
+recognizes only policy-confirmed targets, without requiring any specific provider `public` value.
 
 ## Phase 11 — guarded addition-only population
 

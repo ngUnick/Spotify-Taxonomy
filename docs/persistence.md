@@ -71,6 +71,34 @@ unchanged here. The later managed-playlist/desired-state phase must migrate that
 registration to stable `output_target_id`, allowing Greek and Foreign targets to share one semantic Genre
 parent without relying on display names.
 
+## Phase 10 managed-target registration
+
+Migration 9 adds `managed_target_registrations`, keyed by the stable concrete `output_target_id`. It stores
+only the provider, active account-binding reference, exact returned provider playlist identity, lifecycle
+state, and creation provenance. `active` is the only durable usable state. `provisioning` and
+`recovery_required` deliberately block automatic retries, name/description matching, adoption, recreation,
+and cleanup after uncertain creation. It does not store memberships or make a playlist writable for track
+population; those are separate future concerns.
+
+Migration 10 adds `managed_target_abandoned_unknown_attempts` for a narrow explicit operator recovery
+case. It archives only a `recovery_required` attempt with no known provider playlist identity, records that
+its outcome is `abandoned_unknown`, and removes the live blocking row in one local transaction. This never
+claims remote failure or success, searches/adopts a playlist, or performs provider I/O. The preserved history
+allows a later separately confirmed provisioning attempt to receive a new registration identity.
+
+Migration 11 adds `policy_confirmed` to live managed registrations. New active registrations require a
+non-collaborative provider response. Exact-ID verification confirms the authoritative identity/account and
+non-collaboration conditions; observed provider `public` remains informational rather than authoritative.
+Existing rows remain unconfirmed rather than being retroactively interpreted from local intent.
+
+Migration 12 adds a bounded historical policy-repair attempt journal. It preserves prior diagnostic outcomes
+without retaining raw provider responses. No policy-repair operation is currently exposed.
+
+Migration 13 adds only sanitized transport facts to that journal for future repair attempts: HTTP status,
+whether dispatch/acknowledgement is known, and the exact-ID read-back publication/collaboration values. It
+does not alter or infer facts for historical attempts, and stores no request URL, identifier, header, token,
+or response body.
+
 ## Phase 5 research state
 
 Migration 5 adds `research_jobs`, `research_provider_attempts`, `research_provider_assertions`, and

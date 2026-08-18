@@ -66,6 +66,7 @@ class PlatformPlaylistSummary:
     public: bool | None
     item_count: int | None
     snapshot_id: str | None
+    description: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

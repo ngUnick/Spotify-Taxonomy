@@ -30,6 +30,7 @@ spotify-taxonomy spotify auth status
 spotify-taxonomy spotify auth login
 spotify-taxonomy spotify auth login --callback-port 9443
 spotify-taxonomy spotify auth login --no-browser
+spotify-taxonomy spotify auth login --managed-provisioning
 spotify-taxonomy spotify auth logout
 spotify-taxonomy spotify check
 ```
@@ -37,6 +38,11 @@ spotify-taxonomy spotify check
 `--no-browser` prints the complete, short-lived authorization URL directly to the local terminal so the user
 can open it. That URL is never logged or persisted. The PKCE verifier is never printed. Ordinary output masks
 Client ID and account identifiers.
+
+`--managed-provisioning` is the explicit Phase 10 reauthorization path for the sole additional scope,
+`playlist-modify-private`. It does not request `playlist-modify-public`. The Spotify scope does not broaden
+the application boundary: Phase 10 exposes only one creation that sends best-effort `public=false`, plus durable local
+registration, never item, removal, rename, delete, or generic mutation operations.
 
 The callback-port precedence is command-level `--callback-port`, then `spotify.callback_port` in application
 configuration, then the default `8888`. Authorization and token exchange use the identical exact redirect URI.

@@ -22,6 +22,8 @@ from spotify_playlist_taxonomy.adapters.spotify import (
     WindowsCredentialStore,
     mask_identifier,
     resolve_client_id,
+    PROVISIONING_SCOPE,
+    SpotifyManagedPlaylistProvisioner,
 )
 from spotify_playlist_taxonomy.config import (
     ApplicationConfig,
@@ -68,6 +70,7 @@ from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
 from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
+from spotify_playlist_taxonomy.workflows.phase10 import Phase10Service, ProvisioningError, RecoveryRequiredError
 
 DEFAULT_CONFIG_PATH = Path("config/application.yaml")
 
@@ -94,6 +97,9 @@ codex_app = typer.Typer(no_args_is_help=True, help="Supervised offline Codex fil
 codex_batch_app = typer.Typer(no_args_is_help=True, help="Create and inspect outbound batches.")
 desired_app = typer.Typer(no_args_is_help=True, help="Show local derived concrete target memberships.")
 sync_app = typer.Typer(no_args_is_help=True, help="Build local read-only synchronization plans.")
+managed_app = typer.Typer(no_args_is_help=True, help="Provision one registered non-collaborative managed playlist at a time.")
+managed_provision_app = typer.Typer(no_args_is_help=True, help="Preview or explicitly apply managed playlist provisioning.")
+managed_recovery_app = typer.Typer(no_args_is_help=True, help="Explicitly preserve and abandon unknown provisioning attempts.")
 app.add_typer(config_app, name="config")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(database_app, name="db")
@@ -116,6 +122,9 @@ app.add_typer(codex_app, name="codex")
 codex_app.add_typer(codex_batch_app, name="batch")
 app.add_typer(desired_app, name="desired")
 app.add_typer(sync_app, name="sync")
+app.add_typer(managed_app, name="managed")
+managed_app.add_typer(managed_provision_app, name="provision")
+managed_app.add_typer(managed_recovery_app, name="recovery")
 
 
 def _load_documents(config_path: Path) -> tuple[ApplicationConfig, TaxonomyDocument, Path]:
@@ -318,6 +327,18 @@ def _phase9_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase9
         assert_integrity(connection)
         if current_schema_version(connection) < 8: raise PersistenceError("database requires migration 8; run 'db init'")
         yield Phase9Service(connection, load_phase4_bundle(config_path))
+    finally: connection.close()
+
+
+@contextmanager
+def _phase10_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase10Service]:
+    config_path = config_path.resolve(); config, _, _ = _load_documents(config_path); paths = _paths(config, data_dir)
+    if not paths.database_path.is_file(): raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 13: raise PersistenceError("database requires migration 13; run 'db init'")
+        yield Phase10Service(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
 
@@ -524,6 +545,7 @@ def spotify_auth_login(
         help="Fixed loopback port registered in the Spotify Developer Dashboard.",
     ),
     no_browser: bool = typer.Option(False, "--no-browser"),
+    managed_provisioning: bool = typer.Option(False, "--managed-provisioning", help="Request the private managed-playlist provisioning scope."),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
 ) -> None:
     """Authorize with PKCE; the full URL is printed only with --no-browser."""
@@ -538,7 +560,7 @@ def spotify_auth_login(
                 callback_port=callback_port,
                 authorization_url_sink=typer.echo,
             )
-            token = manager.login(no_browser=no_browser)
+            token = manager.login(no_browser=no_browser, managed_provisioning=True) if managed_provisioning else manager.login(no_browser=no_browser)
         typer.echo(f"Authorized: client_id={mask_identifier(resolved)}")
         typer.echo(f"scopes: {' '.join(token.scopes)}")
     except (OSError, ValueError, ValidationError, SpotifyAdapterError) as error:
@@ -1302,3 +1324,71 @@ def sync_plan(canonical_ids: list[str] = typer.Argument(...), config_path: Path 
             _safe_echo(f"canonical={item.canonical_track_id}\ttarget={item.output_target_id or '-'}\toutcome={item.outcome.value}\treason={item.reason}")
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
+
+
+@managed_app.command("status")
+def managed_status(target_id: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Show only the durable local registration state; no Spotify call is made."""
+    try:
+        with _phase10_service(config_path, data_dir) as service: status = service.status(target_id)
+        _safe_echo(f"target={status.output_target_id}\tstate={status.state}\tprovider_playlist={mask_identifier(status.provider_playlist_id) if status.provider_playlist_id else '-'}\treason={status.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
+
+
+@managed_provision_app.command("preview")
+def managed_provision_preview(target_id: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Preview one public=false non-collaborative creation from local state only; never writes."""
+    try:
+        config, _, _ = _load_documents(config_path); resolved = resolve_client_id(client_id)
+        with _spotify_http_client(config) as http_client:
+            status = _spotify_auth_manager(config, resolved, http_client).status()
+        with _phase10_service(config_path, data_dir) as service:
+            binding = service.connection.execute("SELECT binding_id FROM platform_account_bindings WHERE active=1").fetchone()
+            result = service.preview(target_id, account_binding_id=None if binding is None else binding["binding_id"], scopes=status.scopes)
+        _safe_echo(f"target={result.output_target_id}\tstate={result.state}\treason={result.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError) as error: _fail(error)
+
+
+@managed_provision_app.command("apply")
+def managed_provision_apply(target_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Create one confirmed public=false non-collaborative playlist and register its identity."""
+    try:
+        config, _, _ = _load_documents(config_path); resolved = resolve_client_id(client_id)
+        with _phase10_service(config_path, data_dir) as service:
+            binding = service.connection.execute("SELECT binding_id FROM platform_account_bindings WHERE active=1").fetchone()
+            binding_id = None if binding is None else binding["binding_id"]
+            with _spotify_http_client(config) as http_client:
+                manager = _spotify_auth_manager(config, resolved, http_client)
+                status = manager.status()
+                if PROVISIONING_SCOPE not in status.scopes:
+                    raise ProvisioningError("reauthorization with --managed-provisioning is required")
+                reader = SpotifyReadOnlyAdapter(token_provider=manager, http_client=http_client, max_read_attempts=config.spotify.max_read_attempts)
+                account = reader.read_current_account()
+                result = service.apply(target_id, confirmation, account_binding_id=binding_id, account_id=account.account_id, scopes=status.scopes, creator=SpotifyManagedPlaylistProvisioner(token_provider=manager, http_client=http_client))
+        _safe_echo(f"target={result.output_target_id}\tstate={result.state}\tprovider_playlist={mask_identifier(result.provider_playlist_id) if result.provider_playlist_id else '-'}\treason={result.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, ProvisioningError, RecoveryRequiredError) as error: _fail(error)
+
+
+@managed_app.command("verify")
+def managed_verify(target_id: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Read and verify only the exact registered managed playlist; no provider write occurs."""
+    try:
+        config, _, _ = _load_documents(config_path); resolved = resolve_client_id(client_id)
+        with _phase10_service(config_path, data_dir) as service, _spotify_http_client(config) as http_client:
+            manager = _spotify_auth_manager(config, resolved, http_client)
+            reader = SpotifyReadOnlyAdapter(token_provider=manager, http_client=http_client, max_read_attempts=config.spotify.max_read_attempts)
+            result = service.verify_policy(target_id, reader)
+        _safe_echo(f"target={result.output_target_id}\tpolicy_confirmed={result.policy_confirmed}\tpublic={result.public_state}\tcollaborative={result.collaborative_state}\tname_matches={result.name_matches}\tdescription_matches={result.description_matches}")
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, ProvisioningError) as error: _fail(error)
+
+
+
+
+@managed_recovery_app.command("abandon")
+def managed_recovery_abandon(target_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Locally preserve an unknown attempt after exact operator acknowledgement; no provider call occurs."""
+    try:
+        with _phase10_service(config_path, data_dir) as service:
+            status = service.abandon_unknown(target_id, confirmation)
+        _safe_echo(f"target={status.output_target_id}\tstate={status.state}\treason={status.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError, ProvisioningError) as error: _fail(error)

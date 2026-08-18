@@ -39,8 +39,9 @@ class _Manager:
     def status(self) -> AuthorizationStatus:
         return AuthorizationStatus(True, ("user-read-private",), datetime(2026, 8, 14, tzinfo=timezone.utc))
 
-    def login(self, *, no_browser: bool = False) -> AccessToken:
+    def login(self, *, no_browser: bool = False, managed_provisioning: bool = False) -> AccessToken:
         self.no_browser = no_browser
+        self.managed_provisioning = managed_provisioning
         return AccessToken(
             "synthetic-access",
             datetime(2026, 8, 14, 1, tzinfo=timezone.utc),
@@ -124,6 +125,15 @@ class Phase2ConfigurationCliTests(unittest.TestCase):
         ])
         self.assertNotEqual(0, result.exit_code)
         self.assertIn("1024", result.output)
+
+    def test_managed_provisioning_login_is_explicit(self) -> None:
+        manager = _Manager()
+        with patch.dict("os.environ", {"SPOTIFY_CLIENT_ID": "synthetic-client-id"}), patch(
+            "spotify_playlist_taxonomy.cli._spotify_http_client", return_value=_ContextClient()
+        ), patch("spotify_playlist_taxonomy.cli._spotify_auth_manager", return_value=manager):
+            result = RUNNER.invoke(app, ["spotify", "auth", "login", "--managed-provisioning", "--config", str(CONFIG)])
+        self.assertEqual(0, result.exit_code, result.output)
+        self.assertTrue(manager.managed_provisioning)
 
     def test_secret_and_client_id_fields_remain_forbidden(self) -> None:
         for field in ("client_secret", "client_id", "refresh_token"):

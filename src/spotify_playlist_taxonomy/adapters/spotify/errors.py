@@ -24,6 +24,11 @@ class SpotifyErrorKind(StrEnum):
     NOT_FOUND = "not_found"
     INVALID_RESPONSE = "invalid_response"
     INVALID_CURSOR = "invalid_cursor"
+    REQUEST_NOT_SENT = "request_not_sent"
+    PROVIDER_REJECTED = "provider_rejected"
+    REMOTE_OUTCOME_UNKNOWN = "remote_outcome_unknown"
+    INVALID_SUCCESS_RESPONSE = "invalid_success_response"
+    PROVIDER_POLICY_MISMATCH = "provider_policy_mismatch"
 
 
 class SpotifyAdapterError(PlatformReaderError):
