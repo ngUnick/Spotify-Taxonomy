@@ -1085,6 +1085,58 @@ def catalogue_match_deterministic_preview(
         _fail(error)
 
 
+@catalogue_match_deterministic_app.command("apply")
+def catalogue_match_deterministic_apply(
+    limit: int = typer.Option(..., "--limit", min=1, max=100),
+    yes: bool = typer.Option(False, "--yes"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Explicitly apply a bounded, locally revalidated Tier A plan."""
+    try:
+        with _phase3_store(config_path, data_dir) as (_, _, store):
+            if current_schema_version(store.connection) < 16:
+                raise PersistenceError("database requires migration 16; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            service = TierAEligibilityService(store, binding.binding_id)
+            plan = service.preview(limit=limit, eligible_only=True)
+            selected = tuple(item.candidate_id for item in plan.rows)
+            _safe_echo(f"policy_id: {TIER_A_POLICY_ID}\neligible_now: {plan.eligible}\nselected_for_apply: {len(selected)}\nlimit: {limit}")
+            if not yes and not typer.confirm("Apply this bounded deterministic canonical-link plan?"):
+                raise typer.Abort()
+            if not selected:
+                return
+            report = service.apply(selected)
+        _safe_echo(f"policy_id: {TIER_A_POLICY_ID}\nselected: {report.selected}\nconfirmed: {report.confirmed}\nskipped_no_longer_eligible: {sum(count for _, count in report.skipped)}\nfailed: {report.failed}\nskip_reason_counters_nonexclusive: true")
+        for reason, count in report.skipped:
+            _safe_echo(f"skipped_{reason}: {count}")
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_match_deterministic_app.command("history")
+def catalogue_match_deterministic_history(
+    limit: int = typer.Option(25, "--limit", min=1, max=100),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show locally persisted deterministic Tier A decision provenance."""
+    try:
+        with _phase3_store(config_path, data_dir) as (_, _, store):
+            if current_schema_version(store.connection) < 16:
+                raise PersistenceError("database requires migration 16; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            rows = TierAEligibilityService(store, binding.binding_id).history(limit)
+        for row in rows:
+            _safe_echo(f"policy_id: {row.policy_id}\ndecision_origin: deterministic\ndecided_at: {row.decided_at}\ncandidate_id: {row.candidate_id}\nidentity_id: {row.identity_id}\ncanonical_id: {row.canonical_track_id}\nevidence_summary: {row.evidence_summary}")
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
 @catalogue_match_app.command("evidence-backfill")
 def catalogue_match_evidence_backfill(
     yes: bool = typer.Option(False, "--yes", help="Confirm Spotify reads and local recording-evidence updates."),

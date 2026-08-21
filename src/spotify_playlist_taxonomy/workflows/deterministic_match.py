@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import json
+import uuid
 
 from spotify_playlist_taxonomy.domain.ingestion import MatchCandidateAction, MatchCandidateState
 from spotify_playlist_taxonomy.domain.models import IdentityProvider, PlatformTrackIdentity
 from spotify_playlist_taxonomy.domain.policies import normalize_identity_text
 from spotify_playlist_taxonomy.persistence.phase3 import (
-    Phase3Store, _effective_version_cue, _versions_conflict,
+    Phase3StateError, Phase3Store, _effective_version_cue, _versions_conflict, utc_now,
 )
 
 TIER_A_POLICY_ID = "canonical-tier-a.v1"
@@ -56,6 +58,24 @@ class TierAPreview:
     eligible_with_no_explicit_version_cue: int
     eligible_multiple_comparisons: int
     rows: tuple[TierAEligibility, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TierAApplyReport:
+    selected: int
+    confirmed: int
+    skipped: tuple[tuple[str, int], ...]
+    failed: int
+
+
+@dataclass(frozen=True, slots=True)
+class TierAHistoryEntry:
+    policy_id: str
+    decided_at: str
+    candidate_id: str
+    identity_id: str
+    canonical_track_id: str
+    evidence_summary: str
 
 
 class TierAEligibilityService:
@@ -135,6 +155,59 @@ class TierAEligibilityService:
             sum(len(item.comparisons) > 1 for item in eligible_items),
             selected[:limit],
         )
+
+    def apply(self, candidate_ids: tuple[str, ...]) -> TierAApplyReport:
+        """Apply an explicitly selected bounded plan; every item is rechecked in its transaction."""
+        if not 1 <= len(candidate_ids) <= 100:
+            raise ValueError("apply selection must contain between 1 and 100 candidates")
+        confirmed = failed = 0
+        skipped: Counter[str] = Counter()
+        for candidate_id in candidate_ids:
+            try:
+                current = self.evaluate(candidate_id)
+                if not current.eligible:
+                    skipped.update(current.blocked_reasons or ("no_longer_eligible",))
+                    continue
+                def validate(identifier: str) -> None:
+                    fresh = self.evaluate(identifier)
+                    if not fresh.eligible:
+                        raise Phase3StateError("tier_a_no_longer_eligible:" + ",".join(fresh.blocked_reasons))
+                summary = json.dumps({
+                    "isrc_equal": True,
+                    "comparison_count": len(current.comparisons),
+                    "max_duration_delta_ms": max(c.duration_delta_ms or 0 for c in current.comparisons),
+                    "version_conflict": False,
+                }, sort_keys=True, separators=(",", ":"))
+                self.store.confirm_candidate(
+                    self.binding_id, candidate_id, canonical_id=current.canonical_track_id or "",
+                    create_new=False, link_id=f"link.{uuid.uuid4().hex}", event_id=f"link-event.{uuid.uuid4().hex}",
+                    validator=validate,
+                    deterministic_provenance=(f"deterministic-decision.{uuid.uuid4().hex}", TIER_A_POLICY_ID,
+                                              len(current.comparisons), TIER_A_DURATION_DELTA_MS, summary, utc_now()),
+                )
+                confirmed += 1
+            except Phase3StateError as error:
+                message = str(error)
+                if message.startswith("tier_a_no_longer_eligible:"):
+                    skipped.update(message.split(":", 1)[1].split(","))
+                elif "already" in message or "reviewable" in message:
+                    skipped.update(("no_longer_eligible",))
+                else:
+                    raise
+            except Exception:
+                failed += 1
+                raise
+        return TierAApplyReport(len(candidate_ids), confirmed, tuple(sorted(skipped.items())), failed)
+
+    def history(self, limit: int) -> tuple[TierAHistoryEntry, ...]:
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        rows = self.store.connection.execute(
+            "SELECT policy_id, decided_at, candidate_id, identity_id, canonical_track_id, evidence_summary "
+            "FROM deterministic_match_decisions WHERE account_binding_id=? ORDER BY decided_at, decision_id LIMIT ?",
+            (self.binding_id, limit),
+        )
+        return tuple(TierAHistoryEntry(*(row[key] for key in row.keys())) for row in rows)
 
     def _identity(self, identity_id: str):
         return self.store.connection.execute("SELECT * FROM track_identities WHERE identity_id=?", (identity_id,)).fetchone()

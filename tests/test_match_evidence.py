@@ -66,7 +66,7 @@ class MatchEvidenceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close(); self.temp.cleanup()
 
-    def test_schema_fifteen_adds_nullable_recording_evidence_to_schema_fourteen(self) -> None:
+    def test_schema_sixteen_adds_deterministic_provenance_to_schema_fifteen(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             connection = connect_database(Path(directory) / "older.db")
             migrations = load_migrations()
@@ -75,9 +75,10 @@ class MatchEvidenceTests(unittest.TestCase):
                 connection.executescript(migration.sql)
                 connection.execute("INSERT INTO schema_migrations VALUES (?, ?, ?, 'now')", (migration.version, migration.name, migration.checksum))
             connection.commit()
-            self.assertEqual(15, apply_migrations(connection))
+            self.assertEqual(16, apply_migrations(connection))
             columns = {row[1] for row in connection.execute("PRAGMA table_info(track_identities)")}
             self.assertTrue({"duration_ms", "isrc"}.issubset(columns))
+            self.assertIn("deterministic_match_decisions", {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")})
             connection.close()
 
     def test_analysis_is_read_only_and_counts_pairs_without_selecting_one(self) -> None:
@@ -216,6 +217,21 @@ class MatchEvidenceTests(unittest.TestCase):
         ).fetchall())
         verification.close()
 
+    def test_tier_a_apply_reuses_confirmation_and_persists_provenance(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.commit()
+        service = TierAEligibilityService(self.store, self.binding.binding_id)
+        report = service.apply(("candidate.synthetic",))
+        self.assertEqual(1, report.confirmed)
+        self.assertEqual("confirmed", self.connection.execute(
+            "SELECT state FROM canonical_match_candidates WHERE candidate_id='candidate.synthetic'"
+        ).fetchone()[0])
+        provenance = self.connection.execute(
+            "SELECT policy_id, comparison_count, duration_threshold_ms FROM deterministic_match_decisions"
+        ).fetchone()
+        self.assertEqual(("canonical-tier-a.v1", 1, 500), tuple(provenance))
+        self.assertEqual(0, service.apply(("candidate.synthetic",)).confirmed)
+
     def test_identity_validation_normalizes_isrc_and_rejects_negative_duration(self) -> None:
         identity = PlatformTrackIdentity("identity.normalized", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), duration_ms=0, isrc="us-rc1-76-07839")
         self.assertEqual("USRC17607839", identity.isrc)
@@ -242,8 +258,8 @@ class MatchEvidenceTests(unittest.TestCase):
             initialized = runner.invoke(app, ["db", "init", *args])
             self.assertEqual(0, initialized.exit_code, initialized.output)
             connection = connect_database(database)
-            self.assertEqual(15, apply_migrations(connection))
-            self.assertEqual(1, connection.execute("SELECT COUNT(*) FROM schema_migrations WHERE version=15").fetchone()[0])
+            self.assertEqual(16, apply_migrations(connection))
+            self.assertEqual(1, connection.execute("SELECT COUNT(*) FROM schema_migrations WHERE version=16").fetchone()[0])
             self.assertEqual("Synthetic", connection.execute("SELECT display_title FROM canonical_tracks WHERE canonical_track_id='canonical.synthetic.pre15'").fetchone()[0])
             columns = {row[1] for row in connection.execute("PRAGMA table_info(track_identities)")}
             self.assertTrue({"duration_ms", "isrc"}.issubset(columns))

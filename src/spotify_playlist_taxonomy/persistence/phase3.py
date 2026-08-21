@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
+from collections.abc import Callable
 from typing import Iterator
 
 from spotify_playlist_taxonomy.domain.ingestion import (
@@ -810,6 +811,8 @@ class Phase3Store:
         create_new: bool,
         link_id: str,
         event_id: str,
+        validator: Callable[[str], None] | None = None,
+        deterministic_provenance: tuple[str, str, int, int, str, str] | None = None,
     ) -> None:
         row = self._candidate_row(binding_id, candidate_id)
         if row["state"] not in _REVIEWABLE_STATES:
@@ -830,6 +833,8 @@ class Phase3Store:
         action = LinkEventAction.CREATE_NEW if create_new else LinkEventAction.LINK
         with self.transaction() as connection:
             self._require_active_binding(binding_id, connection)
+            if validator is not None:
+                validator(candidate_id)
             if connection.execute(
                 "SELECT 1 FROM account_canonical_identity_links "
                 "WHERE account_binding_id = ? AND identity_id = ?",
@@ -885,6 +890,16 @@ class Phase3Store:
                 "WHERE account_binding_id = ? AND identity_id = ?",
                 (binding_id, row["identity_id"]),
             )
+            if deterministic_provenance is not None:
+                decision_id, policy_id, comparison_count, threshold, evidence_summary, decided_at = deterministic_provenance
+                connection.execute(
+                    "INSERT INTO deterministic_match_decisions("
+                    "decision_id, policy_id, account_binding_id, candidate_id, identity_id, canonical_track_id, "
+                    "link_id, link_event_id, comparison_count, duration_threshold_ms, evidence_summary, decided_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (decision_id, policy_id, binding_id, candidate_id, row["identity_id"], canonical_id,
+                     link_id, event_id, comparison_count, threshold, evidence_summary, decided_at),
+                )
 
     def reject_candidate(self, binding_id: str, candidate_id: str) -> None:
         row = self._candidate_row(binding_id, candidate_id)

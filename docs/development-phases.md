@@ -166,6 +166,10 @@ no provider call or local state change.
 normalized title/artists context, same ISRC, duration delta at most 500ms, no explicit version conflict, and
 all account-scoped comparison identities agreeing. It is preview-only: no link, canonical, candidate, or
 source mutation path is provided.
+`catalogue match deterministic apply --limit N` is the only mutation entry point for the fixed policy. It
+requires confirmation (or `--yes`), rechecks each selected candidate in the existing confirmation
+transaction, and records compact local provenance under schema 16. `deterministic history` is local,
+read-only, and never contacts a provider.
 Spotify track ingestion does not manufacture `version_label`; evidence status therefore falls back to the
 existing deterministic title-marker helper (`live`, `acoustic`, `remix`, `remaster`, `edit`, `explicit`,
 `clean`, and `instrumental`) for reporting only. It distinguishes compatible explicit cues, conflicts,
