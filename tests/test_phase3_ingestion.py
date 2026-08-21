@@ -14,6 +14,7 @@ from spotify_playlist_taxonomy.adapters.spotify.errors import (
 )
 from spotify_playlist_taxonomy.domain.ingestion import (
     InboxKind,
+    MatchCandidateAction,
     MatchCandidateState,
     OwnershipState,
     ScanStatus,
@@ -525,6 +526,16 @@ class MatchingTests(Phase3TestCase):
         self.assertEqual(2, len(candidates))
         self.assertEqual(1, sum(item.canonical_track_id is None for item in candidates))
         self.assertEqual(0, len(self.store.links(self.binding_id())))
+
+    def test_title_derived_version_conflict_never_creates_link_existing_but_preserves_create_new(self) -> None:
+        identity_id = self.publish(identity("remix", title="Invented Song Remix"), "scan-remix")
+        self.connection.execute("INSERT INTO canonical_tracks VALUES ('recording-remix', 'Invented Song Acoustic', '2026-01-01T00:00:00+00:00')")
+        self.connection.execute("INSERT INTO canonical_track_artists VALUES ('recording-remix', 0, 'Synthetic Artist')")
+        self.connection.execute("INSERT INTO canonical_track_identity_links VALUES ('global-remix', 'recording-remix', ?, 'now')", (identity_id,))
+        self.connection.commit()
+        self.assertEqual("review_required", self.reconcile(identity_id, "remix"))
+        candidates = self.store.candidates(self.binding_id())
+        self.assertEqual([MatchCandidateAction.CREATE_NEW], [item.action for item in candidates])
 
     def test_observation_refreshes_recording_evidence_without_disturbing_link(self) -> None:
         identity_id = self.publish(

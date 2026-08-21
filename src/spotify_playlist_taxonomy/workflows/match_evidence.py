@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from spotify_playlist_taxonomy.persistence.phase3 import (
     Phase3Store,
-    _version_from_title,
+    _effective_version_cue,
     _versions_conflict,
 )
 
@@ -150,4 +150,4 @@ class MatchEvidenceService:
 
 def version_cue(version_label: str | None, title: str) -> str | None:
     """Use persisted label when available, otherwise existing title-marker semantics."""
-    return version_label or _version_from_title(title)
+    return _effective_version_cue(version_label, title)

@@ -18,6 +18,7 @@ from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceService
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
+from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -146,6 +147,74 @@ class MatchEvidenceTests(unittest.TestCase):
         self.assertIn("candidate_id: candidate.synthetic", result.output)
         self.assertIn("category: same-isrc-exact-duration", result.output)
         self.assertEqual(1, sum(line.startswith("candidate_id:") for line in result.output.splitlines()))
+
+    def test_tier_a_evaluator_boundaries_vetoes_and_all_comparisons(self) -> None:
+        service = TierAEligibilityService(self.store, self.binding.binding_id)
+        for delta in (0, 250, 500):
+            with self.subTest(delta=delta):
+                self.connection.execute("UPDATE track_identities SET duration_ms=?, isrc='USRC17607839' WHERE identity_id='identity.linked.a'", (100000 + delta,))
+                self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+                self.connection.commit()
+                self.assertTrue(service.evaluate("candidate.synthetic").eligible)
+        self.connection.execute("UPDATE track_identities SET duration_ms=100501 WHERE identity_id='identity.linked.a'")
+        self.connection.commit()
+        self.assertIn("duration_over_threshold", service.evaluate("candidate.synthetic").blocked_reasons)
+        self.connection.execute("UPDATE track_identities SET duration_ms=100000, isrc='GBAYE6800011' WHERE identity_id='identity.linked.a'")
+        self.connection.commit()
+        self.assertIn("isrc_mismatch", service.evaluate("candidate.synthetic").blocked_reasons)
+        self.connection.execute("UPDATE track_identities SET isrc='USRC17607839' WHERE identity_id='identity.linked.a'")
+        self.connection.execute("INSERT INTO account_canonical_identity_links VALUES ('link.restored', ?, 'identity.linked.b', 'canonical.synthetic', 'now')", (self.binding.binding_id,))
+        self.connection.commit()
+        result = service.evaluate("candidate.synthetic")
+        self.assertFalse(result.eligible)
+        self.assertIn("comparison_inconsistent", result.blocked_reasons)
+        self.assertEqual(
+            ("identity.linked.a", "identity.linked.b"),
+            tuple(item.identity_id for item in result.comparisons),
+        )
+
+    def test_tier_a_fails_closed_for_missing_evidence_version_and_candidate_state(self) -> None:
+        service = TierAEligibilityService(self.store, self.binding.binding_id)
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.execute("UPDATE track_identities SET isrc=NULL WHERE identity_id='identity.unresolved'")
+        self.connection.commit()
+        self.assertIn("isrc_missing", service.evaluate("candidate.synthetic").blocked_reasons)
+        self.connection.execute("UPDATE track_identities SET isrc='USRC17607839', duration_ms=NULL WHERE identity_id='identity.unresolved'")
+        self.connection.commit()
+        self.assertIn("duration_missing", service.evaluate("candidate.synthetic").blocked_reasons)
+        self.connection.execute("UPDATE track_identities SET duration_ms=100000, version_label=NULL, title='Synthetic Remix' WHERE identity_id='identity.unresolved'")
+        self.connection.commit()
+        self.assertIn("version_conflict", service.evaluate("candidate.synthetic").blocked_reasons)
+        self.connection.execute("UPDATE canonical_match_candidates SET state='candidate' WHERE candidate_id='candidate.synthetic'")
+        self.connection.commit()
+        self.assertIn("wrong_candidate_state", service.evaluate("candidate.synthetic").blocked_reasons)
+
+    def test_tier_a_preview_cli_is_local_read_only_and_bounded(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.commit()
+        expected_candidates = self.connection.execute(
+            "SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id"
+        ).fetchall()
+        expected_links = self.connection.execute(
+            "SELECT identity_id, canonical_track_id FROM account_canonical_identity_links ORDER BY identity_id"
+        ).fetchall()
+        database = Path(self.temp.name) / "app.db"
+        data_dir = Path(self.temp.name) / "tier-a-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        runner = CliRunner()
+        result = runner.invoke(app, ["catalogue", "match", "deterministic", "preview", "--eligible-only", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)])
+        self.assertEqual(0, result.exit_code, result.output)
+        self.assertIn("policy_id: canonical-tier-a.v1", result.output)
+        self.assertIn("eligible: 1", result.output)
+        self.assertEqual(1, sum(line.startswith("candidate_id:") for line in result.output.splitlines()))
+        verification = connect_database(data_dir / "state" / "app.db")
+        self.assertEqual(expected_candidates, verification.execute(
+            "SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id"
+        ).fetchall())
+        self.assertEqual(expected_links, verification.execute(
+            "SELECT identity_id, canonical_track_id FROM account_canonical_identity_links ORDER BY identity_id"
+        ).fetchall())
+        verification.close()
 
     def test_identity_validation_normalizes_isrc_and_rejects_negative_duration(self) -> None:
         identity = PlatformTrackIdentity("identity.normalized", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), duration_ms=0, isrc="us-rc1-76-07839")

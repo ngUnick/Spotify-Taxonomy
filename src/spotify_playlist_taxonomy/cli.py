@@ -75,6 +75,9 @@ from spotify_playlist_taxonomy.workflows.match_evidence_review import (
     ANOMALY_CATEGORIES,
     MatchEvidenceReviewService,
 )
+from spotify_playlist_taxonomy.workflows.deterministic_match import (
+    TIER_A_POLICY_ID, TierAEligibilityService,
+)
 from spotify_playlist_taxonomy.workflows.research import (
     EvidenceSufficiencyService,
     ResearchCoordinator,
@@ -102,6 +105,7 @@ spotify_ingest_app = typer.Typer(no_args_is_help=True, help="Run and inspect rea
 catalogue_app = typer.Typer(no_args_is_help=True, help="Review the local canonical catalogue.")
 catalogue_identity_app = typer.Typer(no_args_is_help=True, help="Inspect account-scoped track identities.")
 catalogue_match_app = typer.Typer(no_args_is_help=True, help="Review canonical matching candidates.")
+catalogue_match_deterministic_app = typer.Typer(no_args_is_help=True, help="Read-only deterministic match-policy analysis.")
 catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit canonical identity links.")
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
 derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characteristics from persisted evidence.")
@@ -130,6 +134,7 @@ spotify_app.add_typer(spotify_ingest_app, name="ingest")
 app.add_typer(catalogue_app, name="catalogue")
 catalogue_app.add_typer(catalogue_identity_app, name="identity")
 catalogue_app.add_typer(catalogue_match_app, name="match")
+catalogue_match_app.add_typer(catalogue_match_deterministic_app, name="deterministic")
 catalogue_app.add_typer(catalogue_link_app, name="link")
 app.add_typer(research_app, name="research")
 app.add_typer(derive_app, name="derive")
@@ -1048,6 +1053,34 @@ def catalogue_match_evidence_list(
                 f"duration_delta_ms: {item.duration_delta_ms}\ncategory: {item.category}\n"
                 f"paired_create_new_candidate_id: {item.paired_create_new_candidate_id or '-'}\n"
             )
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_match_deterministic_app.command("preview")
+def catalogue_match_deterministic_preview(
+    limit: int = typer.Option(25, "--limit", min=1, max=100),
+    eligible_only: bool = typer.Option(False, "--eligible-only"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Analyze Tier A eligibility locally; this command cannot apply or create links."""
+    try:
+        with _phase3_store(config_path, data_dir) as (_, _, store):
+            if current_schema_version(store.connection) < 15:
+                raise PersistenceError("database requires migration 15; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            preview = TierAEligibilityService(store, binding.binding_id).preview(limit=limit, eligible_only=eligible_only)
+        _safe_echo(f"policy_id: {TIER_A_POLICY_ID}\ntotal_candidates: {preview.total_candidates}\neligible: {preview.eligible}\nblocked: {preview.blocked}\nblocked_reason_counters_nonexclusive: true")
+        for reason, count in preview.blocked_reasons: _safe_echo(f"blocked_{reason}: {count}")
+        for name in ("eligible_exact_duration", "eligible_duration_le_250ms", "eligible_duration_le_500ms", "eligible_with_explicit_compatible_version_cue", "eligible_with_no_explicit_version_cue", "eligible_multiple_comparisons"):
+            _safe_echo(f"{name}: {getattr(preview, name)}")
+        for item in preview.rows:
+            _safe_echo(f"candidate_id: {item.candidate_id}\neligible: {item.eligible}\nblocked_reasons: {','.join(item.blocked_reasons) or '-'}\nidentity_id: {item.identity_id or '-'}\nidentity: {(item.identity_title or '-')} — {', '.join(item.identity_artists) or '-'}\nidentity_version_cue: {item.identity_version_cue or '-'}\nidentity_duration_ms: {item.identity_duration_ms if item.identity_duration_ms is not None else '-'}\nidentity_isrc: {item.identity_isrc or '-'}\ncanonical_id: {item.canonical_track_id or '-'}")
+            for comparison in item.comparisons:
+                _safe_echo(f"comparison_identity_id: {comparison.identity_id}\ncomparison: {comparison.title} — {', '.join(comparison.artists)}\ncomparison_version_cue: {comparison.version_cue or '-'}\ncomparison_duration_ms: {comparison.duration_ms if comparison.duration_ms is not None else '-'}\ncomparison_isrc: {comparison.isrc or '-'}\nduration_delta_ms: {comparison.duration_delta_ms if comparison.duration_delta_ms is not None else '-'}")
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
         _fail(error)
 

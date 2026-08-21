@@ -162,6 +162,10 @@ surface. It emits one deterministic row per linked comparison identity (so multi
 collapsed) for `same-isrc-duration-gt-5s`, `same-isrc-duration-gt-2s`,
 `different-isrc-duration-le-1s`, `different-isrc-exact-duration`, or `same-isrc-exact-duration`. It makes
 no provider call or local state change.
+`catalogue match deterministic preview` evaluates the fixed `canonical-tier-a.v1` policy locally only:
+normalized title/artists context, same ISRC, duration delta at most 500ms, no explicit version conflict, and
+all account-scoped comparison identities agreeing. It is preview-only: no link, canonical, candidate, or
+source mutation path is provided.
 Spotify track ingestion does not manufacture `version_label`; evidence status therefore falls back to the
 existing deterministic title-marker helper (`live`, `acoustic`, `remix`, `remaster`, `edit`, `explicit`,
 `clean`, and `instrumental`) for reporting only. It distinguishes compatible explicit cues, conflicts,

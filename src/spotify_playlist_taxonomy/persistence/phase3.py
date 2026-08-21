@@ -703,13 +703,15 @@ class Phase3Store:
         actionable = 0
         if evidence:
             for index, item in enumerate(evidence):
+                if _versions_conflict(
+                    _effective_version_cue(identity.version_label, identity.title),
+                    _effective_version_cue(None, item.display_title),
+                ):
+                    continue
                 requires_confirmation = (
                     bool(state["preexisting"])
                     or user_touched
                     or foreign_mapping
-                    or _versions_conflict(
-                        identity.version_label, _version_from_title(item.display_title)
-                    )
                 )
                 basis = (
                     "other_account_mapping_requires_confirmation"
@@ -1301,6 +1303,11 @@ def _version_from_title(title: str) -> str | None:
     normalized = normalize_identity_text(title)
     words = tuple(word for word in _VERSION_WORDS if word in normalized.split())
     return " ".join(words) if words else None
+
+
+def _effective_version_cue(version_label: str | None, title: str) -> str | None:
+    """Use an explicit stored label, otherwise the established title-marker semantics."""
+    return version_label or _version_from_title(title)
 
 
 def _versions_conflict(left: str | None, right: str | None) -> bool:
