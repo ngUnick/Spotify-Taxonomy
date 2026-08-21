@@ -33,7 +33,7 @@ class BackupTests(unittest.TestCase):
         backup = create_backup(self.paths, retention_count=5)
         self.assertTrue(self.paths.backup_dir.is_dir())
         manifest = load_and_verify_backup(self.paths, backup)
-        self.assertEqual(14, manifest.schema_version)
+        self.assertEqual(15, manifest.schema_version)
         self.assertEqual("taxonomy.v2", manifest.taxonomy_version)
 
     def test_restore_recovers_prior_database_and_protects_current(self) -> None:

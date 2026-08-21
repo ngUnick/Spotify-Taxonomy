@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from spotify_playlist_taxonomy import __version__
 from spotify_playlist_taxonomy.adapters.spotify import (
     SpotifyAdapterError,
+    SpotifyErrorKind,
     SpotifyAuthManager,
     SpotifyReadOnlyAdapter,
     WindowsCredentialStore,
@@ -68,6 +69,8 @@ from spotify_playlist_taxonomy.persistence.phase3 import Phase3StateError, Phase
 from spotify_playlist_taxonomy.runtime import RuntimePaths, discover_repository_root
 from spotify_playlist_taxonomy.workflows.phase3 import Phase3Coordinator
 from spotify_playlist_taxonomy.workflows.review import Phase3ReviewService
+from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceService
+from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.research import (
     EvidenceSufficiencyService,
     ResearchCoordinator,
@@ -173,6 +176,16 @@ def _configure_file_logging(config: ApplicationConfig, paths: RuntimePaths) -> N
 
 def _fail(error: Exception) -> None:
     _safe_echo(f"Error: {error}", err=True)
+    if isinstance(error, SpotifyAdapterError) and error.kind in {
+        SpotifyErrorKind.QUOTA_EXHAUSTED,
+        SpotifyErrorKind.RATE_LIMITED,
+    }:
+        _safe_echo(f"reason: {error.reason or error.kind.value.upper()}", err=True)
+        _safe_echo(
+            "retry_after_seconds: "
+            f"{error.retry_after_seconds if error.retry_after_seconds is not None else 'unavailable'}",
+            err=True,
+        )
     raise typer.Exit(code=1)
 
 
@@ -978,6 +991,68 @@ def catalogue_match_show(
                 f"state={peer.state.value}\tcanonical={peer.canonical_track_id or '-'}"
             )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_match_app.command("evidence-status")
+def catalogue_match_evidence_status(
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show aggregate local evidence counts for unresolved canonical matches."""
+    try:
+        with _phase3_store(config_path, data_dir) as (_, _, store):
+            if current_schema_version(store.connection) < 15:
+                raise PersistenceError("database requires migration 15; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            report = MatchEvidenceService(store, binding.binding_id).report()
+        typer.echo("duration_thresholds_cumulative: true")
+        for name, value in report.metrics:
+            typer.echo(f"{name}: {value}")
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_match_app.command("evidence-backfill")
+def catalogue_match_evidence_backfill(
+    yes: bool = typer.Option(False, "--yes", help="Confirm Spotify reads and local recording-evidence updates."),
+    client_id: str | None = typer.Option(None, "--client-id"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Backfill recording evidence for current unresolved link-existing comparisons only."""
+    try:
+        with _phase3_store(config_path, data_dir) as (config, _, store):
+            if current_schema_version(store.connection) < 15:
+                raise PersistenceError("database requires migration 15; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            service = MatchEvidenceBackfillService(store, binding.binding_id)
+            plan = service.plan()
+            _safe_echo(f"target_identities: {plan.target_identities}")
+            _safe_echo(f"already_complete: {plan.already_complete}")
+            _safe_echo(f"needs_backfill: {plan.needs_backfill}")
+            if not yes and not typer.confirm("Read selected Spotify tracks and store only duration/ISRC evidence?"):
+                raise typer.Abort()
+            resolved = resolve_client_id(client_id)
+            with _spotify_http_client(config) as http_client:
+                manager = _spotify_auth_manager(config, resolved, http_client)
+                reader = SpotifyReadOnlyAdapter(
+                    token_provider=manager, http_client=http_client,
+                    max_read_attempts=config.spotify.max_read_attempts,
+                )
+                service.require_matching_account(reader.read_current_account().account_id)
+                report = service.backfill(reader)
+        for name in (
+            "target_identities", "already_had_duration", "already_had_isrc", "requested",
+            "updated_duration", "updated_isrc", "updated_both", "provider_missing_or_unavailable",
+            "failed", "remaining_duration_missing", "remaining_isrc_missing",
+        ):
+            _safe_echo(f"{name}: {getattr(report, name)}")
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError, SpotifyAdapterError) as error:
         _fail(error)
 
 

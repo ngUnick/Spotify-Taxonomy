@@ -16,7 +16,7 @@ explicit, local, protected, and never committed.
 | Category | Minimum useful fields / reason | Retention principle |
 | --- | --- | --- |
 | Canonical track | local ID, display title/artists, ambiguity state | while referenced; needed for portable classification |
-| Identity mapping | provider, provider track ID, minimal title/artists, match state/confidence/basis | while syncing/matching; preserve distinct versions |
+| Identity mapping | provider, provider track ID, minimal title/artists, duration milliseconds, ISRC, match state/confidence/basis | while syncing/matching; preserve distinct versions; duration and ISRC are provider-derived reconciliation evidence refreshed on observation |
 | Playlist registration | logical ID, stable platform ID, role, ownership validation state | while configured; authorizes/guards sync |
 | Source scan | account binding, source ID, status, global positions, minimal identity/issue references, snapshot or Saved Tracks guards, versioned digest | retain for resume/audit; only a completed publication is current |
 | Research evidence | normalized fact/tag/short description, source/kind, reference ID/URL, confidence, retrieval/freshness status | while useful and permitted; refresh/expire by provider policy |
@@ -34,6 +34,11 @@ profile data, artwork, audio, previews, audio analysis/features, listening-histo
 recommendations/genre inference, popularity, arbitrary album metadata, copied webpages, large review
 passages, hidden model reasoning, or arbitrary debug dumps. Logs avoid title/artist by default and use local
 IDs/counts; diagnostic disclosure must be deliberate and temporary.
+
+Phase 15 retains only Spotify `duration_ms` and `external_ids.isrc` for provider-identity reconciliation,
+duplicate/version review, and deterministic aggregate evidence analysis. They are nullable, refreshed when an
+identity is observed, and follow the existing provider-derived disconnect/purge policy. It retains no general
+external-ID blob, album data, artwork, popularity, audio features, or raw Spotify response.
 
 Real Spotify identities may be processed by Codex only in a deliberate, explicitly approved runtime
 ingestion, review, or classification workflow. They must not become repository fixtures, documentation

@@ -105,6 +105,12 @@ facts, lifecycle outcome, and timestamps. A committed `started` or `recovery_req
 automatic retry after an uncertain provider addition. It stores no provider response, URI, snapshot, token,
 or playlist-content copy.
 
+Migration 15 adds nullable `duration_ms` and normalized `isrc` scalar fields to `track_identities`. They are
+minimal provider-derived reconciliation evidence refreshed during an approved source observation; no raw
+response, album metadata, or general external-ID blob is retained. The confirmed match-evidence backfill may
+also update only these two fields on locally selected existing Spotify identities; it creates no identity, scan,
+candidate, canonical, or link state.
+
 ## Phase 5 research state
 
 Migration 5 adds `research_jobs`, `research_provider_attempts`, `research_provider_assertions`, and

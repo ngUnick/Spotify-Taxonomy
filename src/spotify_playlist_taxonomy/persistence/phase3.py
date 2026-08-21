@@ -95,6 +95,30 @@ class Phase3Store:
             row["binding_id"], row["account_id"], row["current_user_id"], True
         )
 
+    def update_identity_recording_evidence(
+        self, identity_id: str, *, duration_ms: int, isrc: str | None
+    ) -> tuple[bool, bool]:
+        """Update approved recording evidence on one existing Spotify identity only."""
+        if isinstance(duration_ms, bool) or not isinstance(duration_ms, int) or duration_ms < 0:
+            raise Phase3StateError("recording duration must be a non-negative integer")
+        row = self.connection.execute(
+            "SELECT duration_ms, isrc FROM track_identities "
+            "WHERE identity_id = ? AND provider = 'spotify'",
+            (identity_id,),
+        ).fetchone()
+        if row is None:
+            raise Phase3StateError("selected Spotify identity was not found")
+        duration_changed = row["duration_ms"] is None
+        isrc_changed = row["isrc"] is None and isrc is not None
+        if duration_changed or isrc_changed:
+            self.connection.execute(
+                "UPDATE track_identities SET duration_ms = COALESCE(duration_ms, ?), "
+                "isrc = COALESCE(isrc, ?) WHERE identity_id = ?",
+                (duration_ms, isrc, identity_id),
+            )
+            self.connection.commit()
+        return duration_changed, isrc_changed
+
     def bind_account(self, binding_id: str, account_id: str, current_user_id: str) -> AccountBinding:
         active = self.active_account()
         now = utc_now()
@@ -1063,22 +1087,22 @@ class Phase3Store:
                 """
                 INSERT INTO track_identities(
                     identity_id, provider, provider_track_id, title, normalized_title,
-                    version_label, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    version_label, duration_ms, isrc, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     identity.identity_id, identity.provider.value, identity.provider_track_id,
                     identity.title, normalize_identity_text(identity.title),
-                    identity.version_label, utc_now(),
+                    identity.version_label, identity.duration_ms, identity.isrc, utc_now(),
                 ),
             )
         else:
             connection.execute(
-                "UPDATE track_identities SET title = ?, normalized_title = ?, version_label = ? "
+                "UPDATE track_identities SET title = ?, normalized_title = ?, version_label = ?, duration_ms = ?, isrc = ? "
                 "WHERE identity_id = ?",
                 (
                     identity.title, normalize_identity_text(identity.title),
-                    identity.version_label, selected_id,
+                    identity.version_label, identity.duration_ms, identity.isrc, selected_id,
                 ),
             )
             connection.execute(
@@ -1141,7 +1165,8 @@ class Phase3Store:
         )
         return PlatformTrackIdentity(
             row["identity_id"], IdentityProvider(row["provider"]), row["title"], artists,
-            row["provider_track_id"], row["version_label"],
+            row["provider_track_id"], row["version_label"], None,
+            row["duration_ms"], row["isrc"],
         )
 
     def _canonical(self, canonical_id: str) -> CanonicalTrack:

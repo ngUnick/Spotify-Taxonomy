@@ -47,6 +47,8 @@ def identity(
     artist: str = "Synthetic Artist",
     *,
     version: str | None = None,
+    duration_ms: int | None = None,
+    isrc: str | None = None,
 ) -> PlatformTrackIdentity:
     return PlatformTrackIdentity(
         identity_id=f"spotify.{track_id}",
@@ -55,6 +57,8 @@ def identity(
         title=title,
         artists=(artist,),
         version_label=version,
+        duration_ms=duration_ms,
+        isrc=isrc,
     )
 
 
@@ -521,6 +525,22 @@ class MatchingTests(Phase3TestCase):
         self.assertEqual(2, len(candidates))
         self.assertEqual(1, sum(item.canonical_track_id is None for item in candidates))
         self.assertEqual(0, len(self.store.links(self.binding_id())))
+
+    def test_observation_refreshes_recording_evidence_without_disturbing_link(self) -> None:
+        identity_id = self.publish(
+            identity("recording-evidence", duration_ms=120000, isrc="us-rc1-76-07839"),
+            "scan-recording-evidence",
+        )
+        canonical = self.reconcile(identity_id)
+        self.publish(
+            identity("recording-evidence", duration_ms=120250, isrc="USRC17607839"),
+            "scan-recording-evidence-refresh",
+        )
+        row = self.connection.execute(
+            "SELECT duration_ms, isrc FROM track_identities WHERE identity_id=?", (identity_id,)
+        ).fetchone()
+        self.assertEqual((120250, "USRC17607839"), tuple(row))
+        self.assertEqual(canonical, self.store.links(self.binding_id())[0].canonical.canonical_track_id)
 
     def test_candidate_limit_follows_state_filter_and_preserves_order(self) -> None:
         self.connection.execute(

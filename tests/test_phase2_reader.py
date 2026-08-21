@@ -197,7 +197,7 @@ class ReaderTests(unittest.TestCase):
         )
 
     def test_saved_tracks_use_saved_track_object_without_schema_diagnostics(self) -> None:
-        payload = {"items": [{"track": track("SavedOne")}], "next": None}
+        payload = {"items": [{"track": {**track("SavedOne"), "duration_ms": 123456, "external_ids": {"isrc": "us-rc1-76-07839"}}}], "next": None}
         requests: list[httpx.Request] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -207,13 +207,28 @@ class ReaderTests(unittest.TestCase):
         reader, _ = self.make_reader(handler)
         page = reader.read_saved_tracks()
         self.assertEqual("SavedOne", page.items[0].provider_track_id)
+        self.assertEqual(123456, page.items[0].duration_ms)
+        self.assertEqual("USRC17607839", page.items[0].isrc)
         self.assertIsNone(page.schema_diagnostics)
         self.assertEqual(
-            "items(track(id,name,type,is_local,artists(name))),next,offset,limit,total",
+            "items(track(id,name,type,is_local,artists(name),duration_ms,external_ids(isrc))),next,offset,limit,total",
             requests[0].url.params["fields"],
         )
         for excluded in ("album", "images", "popularity", "preview_url"):
             self.assertNotIn(excluded, requests[0].url.params["fields"])
+
+    def test_single_track_evidence_read_retains_only_duration_and_normalized_isrc(self) -> None:
+        requests: list[httpx.Request] = []
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"duration_ms": 123456, "external_ids": {"isrc": "us-rc1-76-07839"}, "name": "discard"})
+        reader, _ = self.make_reader(handler)
+        evidence = reader.read_track_recording_evidence("SyntheticTrack")
+        self.assertEqual(123456, evidence.duration_ms)
+        self.assertEqual("USRC17607839", evidence.isrc)
+        self.assertEqual("/v1/tracks/SyntheticTrack", requests[0].url.path)
+        self.assertNotIn("fields", requests[0].url.params)
+        self.assertNotIn("/tracks?", str(requests[0].url))
 
     def test_cursor_is_local_and_arbitrary_next_url_is_never_followed(self) -> None:
         requests: list[httpx.Request] = []
@@ -311,14 +326,29 @@ class ReaderTests(unittest.TestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal calls
             calls += 1
-            return httpx.Response(429, json={"error": {"reason": "QUOTA_EXCEEDED"}})
+            return httpx.Response(429, headers={"Retry-After": "3600"}, json={"error": {"reason": "QUOTA_EXCEEDED"}})
 
         reader, _ = self.make_reader(handler, max_read_attempts=3, sleeper=sleeps.append)
         with self.assertRaises(SpotifyAdapterError) as raised:
             reader.read_current_account()
         self.assertEqual(SpotifyErrorKind.QUOTA_EXHAUSTED, raised.exception.kind)
+        self.assertEqual("QUOTA_EXCEEDED", raised.exception.reason)
+        self.assertEqual(3600, raised.exception.retry_after_seconds)
         self.assertEqual(1, calls)
         self.assertFalse(sleeps)
+
+    def test_final_rate_limit_exposes_only_valid_integral_retry_after(self) -> None:
+        for header, expected in (("7", 7), (None, None), ("3.5", None)):
+            with self.subTest(header=header):
+                headers = {} if header is None else {"Retry-After": header}
+                reader, _ = self.make_reader(
+                    lambda request: httpx.Response(429, headers=headers), max_read_attempts=1
+                )
+                with self.assertRaises(SpotifyAdapterError) as raised:
+                    reader.read_current_account()
+                self.assertEqual(SpotifyErrorKind.RATE_LIMITED, raised.exception.kind)
+                self.assertEqual("RATE_LIMITED", raised.exception.reason)
+                self.assertEqual(expected, raised.exception.retry_after_seconds)
 
     def test_errors_do_not_include_response_data_or_identifiers(self) -> None:
         sensitive = "synthetic-sensitive-response-body"

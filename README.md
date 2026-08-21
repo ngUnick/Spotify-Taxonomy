@@ -93,6 +93,8 @@ spotify-taxonomy catalogue identity show IDENTITY_ID
 spotify-taxonomy catalogue match list
 spotify-taxonomy catalogue match list --state ambiguous --limit 25
 spotify-taxonomy catalogue match show CANDIDATE_ID
+spotify-taxonomy catalogue match evidence-status
+spotify-taxonomy catalogue match evidence-backfill
 spotify-taxonomy catalogue match confirm-existing CANDIDATE_ID CANONICAL_ID
 spotify-taxonomy catalogue match confirm-new CANDIDATE_ID
 spotify-taxonomy catalogue match reject CANDIDATE_ID

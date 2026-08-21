@@ -146,6 +146,17 @@ For canonical match review, use `catalogue match list --state ambiguous --limit 
 `catalogue match show CANDIDATE_ID`, then explicitly choose either `confirm-existing` for that candidate or
 `confirm-new` using the displayed open-peer candidate ID. Confirmation resolves that identity and supersedes
 its open peers; no bulk matching authority exists.
+
+Phase 15 adds only nullable provider-derived duration milliseconds and ISRC to observed Spotify identities.
+The local-only `catalogue match evidence-status` command reports aggregate evidence counters for unresolved
+link-existing candidates and never exposes identities or makes decisions. Existing approved source scans refresh
+these fields for observed identities. `catalogue match evidence-backfill` is a separately confirmed, sequential
+Spotify-read maintenance operation: it selects only current ambiguous `link_existing` identities and existing
+account-scoped identities linked to their proposed canonicals, then retains only duration and ISRC. It reports
+aggregates only, never scans sources, makes no matching decision, and uses a single-track read rather than a
+deprecated multi-track lookup. A stored duration marks a completed request, so an optional absent ISRC is not
+retried indefinitely. Run `db init` first when upgrading an existing runtime database so its explicit migration
+mechanism applies schema 15.
 The deferred real Phase 11 addition remains deferred until a genuine desired membership exists.
 
 ## Future, separately approved

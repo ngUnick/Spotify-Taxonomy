@@ -5,8 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
+import re
+import unicodedata
 
 MAX_JUSTIFICATION_LENGTH: Final = 280
+_ISRC = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{7}$")
 
 
 class IdentityProvider(StrEnum):
@@ -154,6 +157,8 @@ class PlatformTrackIdentity:
     provider_track_id: str | None = None
     version_label: str | None = None
     linked_from_provider_track_id: str | None = None
+    duration_ms: int | None = None
+    isrc: str | None = None
 
     def __post_init__(self) -> None:
         _validate_nonblank("identity_id", self.identity_id)
@@ -165,6 +170,19 @@ class PlatformTrackIdentity:
             _validate_nonblank("version_label", self.version_label)
         if self.linked_from_provider_track_id is not None:
             _validate_nonblank("linked_from_provider_track_id", self.linked_from_provider_track_id)
+        if self.duration_ms is not None and (
+            isinstance(self.duration_ms, bool)
+            or not isinstance(self.duration_ms, int)
+            or self.duration_ms < 0
+        ):
+            raise ValueError("duration_ms must be a non-negative integer")
+        if self.isrc is not None:
+            normalized_isrc = re.sub(
+                r"[\s-]+", "", unicodedata.normalize("NFKC", self.isrc)
+            ).upper()
+            if not _ISRC.fullmatch(normalized_isrc):
+                raise ValueError("isrc must be a valid normalized ISRC")
+            object.__setattr__(self, "isrc", normalized_isrc)
 
 
 @dataclass(frozen=True, slots=True)

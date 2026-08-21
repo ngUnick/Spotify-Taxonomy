@@ -34,8 +34,23 @@ class SpotifyErrorKind(StrEnum):
 class SpotifyAdapterError(PlatformReaderError):
     """A user-safe error that never includes response bodies or secrets."""
 
-    def __init__(self, kind: SpotifyErrorKind, message: str) -> None:
+    def __init__(
+        self,
+        kind: SpotifyErrorKind,
+        message: str,
+        *,
+        reason: str | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        if retry_after_seconds is not None and (
+            isinstance(retry_after_seconds, bool)
+            or not isinstance(retry_after_seconds, int)
+            or retry_after_seconds < 0
+        ):
+            raise ValueError("retry_after_seconds must be a non-negative integer or None")
         self.kind = kind
+        self.reason = reason
+        self.retry_after_seconds = retry_after_seconds
         access_state = {
             SpotifyErrorKind.FORBIDDEN: PlatformAccessState.FORBIDDEN,
             SpotifyErrorKind.NOT_FOUND: PlatformAccessState.NOT_FOUND,

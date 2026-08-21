@@ -39,6 +39,7 @@ _ALLOWED_PATHS = (
     re.compile(r"^/me/tracks$"),
     re.compile(r"^/playlists/[A-Za-z0-9]+$"),
     re.compile(r"^/playlists/[A-Za-z0-9]+/items$"),
+    re.compile(r"^/tracks/[A-Za-z0-9]+$"),
 )
 
 
@@ -50,6 +51,14 @@ class TokenProvider(Protocol):
 class _ParsedTrack:
     identity: PlatformTrackIdentity | None
     issue: PlatformReadIssue | None
+
+
+@dataclass(frozen=True, slots=True)
+class SpotifyRecordingEvidence:
+    """The only recording evidence retained by targeted match backfill."""
+
+    duration_ms: int
+    isrc: str | None
 
 
 class SpotifyReadOnlyAdapter:
@@ -103,7 +112,7 @@ class SpotifyReadOnlyAdapter:
                 "limit": PAGE_SIZE,
                 "offset": offset,
                 "fields": (
-                    "items(is_local,item(id,linked_from(id),name,type,is_local,artists(name))),"
+                    "items(is_local,item(id,linked_from(id),name,type,is_local,artists(name),duration_ms,external_ids(isrc))),"
                     "next,offset,limit,total"
                 ),
             },
@@ -149,7 +158,7 @@ class SpotifyReadOnlyAdapter:
             {
                 "limit": PAGE_SIZE,
                 "offset": offset,
-                "fields": "items(track(id,name,type,is_local,artists(name))),next,offset,limit,total",
+                "fields": "items(track(id,name,type,is_local,artists(name),duration_ms,external_ids(isrc))),next,offset,limit,total",
             },
         )
         raw_items = _required_list(payload, "items")
@@ -177,6 +186,28 @@ class SpotifyReadOnlyAdapter:
             issues=tuple(issues),
             entries=tuple(ordered), offset=offset, limit=limit, total=total,
         )
+
+    def read_track_recording_evidence(self, provider_track_id: str) -> SpotifyRecordingEvidence:
+        """Read only duration and ISRC for one already-known Spotify track."""
+        _validate_track_id(provider_track_id)
+        payload = self._get(f"/tracks/{provider_track_id}")
+        duration_ms = payload.get("duration_ms")
+        if isinstance(duration_ms, bool) or not isinstance(duration_ms, int) or duration_ms < 0:
+            raise _invalid_response()
+        external_ids = payload.get("external_ids")
+        if external_ids is not None and not isinstance(external_ids, dict):
+            raise _invalid_response()
+        isrc = None if external_ids is None else external_ids.get("isrc")
+        if isrc is not None and (not isinstance(isrc, str) or not isrc.strip()):
+            raise _invalid_response()
+        try:
+            normalized = PlatformTrackIdentity(
+                "spotify:evidence", IdentityProvider.SPOTIFY, "Synthetic", ("Synthetic",),
+                duration_ms=duration_ms, isrc=isrc,
+            ).isrc
+        except ValueError:
+            raise _invalid_response() from None
+        return SpotifyRecordingEvidence(duration_ms, normalized)
 
     def _get(self, path: str, params: dict[str, object] | None = None) -> dict[str, object]:
         if not any(pattern.fullmatch(path) for pattern in _ALLOWED_PATHS):
@@ -217,10 +248,15 @@ class SpotifyReadOnlyAdapter:
                     "Spotify authorization was rejected after token refresh",
                 )
             if response.status_code == 429:
+                retry_after_seconds = _parse_retry_after_seconds(
+                    response.headers.get("Retry-After")
+                )
                 if _is_quota_exhausted(response):
                     raise SpotifyAdapterError(
                         SpotifyErrorKind.QUOTA_EXHAUSTED,
                         "Spotify API quota is exhausted; read processing stopped",
+                        reason="QUOTA_EXCEEDED",
+                        retry_after_seconds=retry_after_seconds,
                     )
                 if attempt < self._max_attempts:
                     delay = _parse_retry_after(response.headers.get("Retry-After"), self._now())
@@ -229,6 +265,8 @@ class SpotifyReadOnlyAdapter:
                 raise SpotifyAdapterError(
                     SpotifyErrorKind.RATE_LIMITED,
                     "Spotify rate limit remained active after bounded retries",
+                    reason="RATE_LIMITED",
+                    retry_after_seconds=retry_after_seconds,
                 )
             if response.status_code in {502, 503, 504} and attempt < self._max_attempts:
                 self._sleep(_fallback_delay(attempt))
@@ -310,6 +348,7 @@ def _parse_track(value: object, index: int, *, wrapper_local: object) -> _Parsed
         return _ParsedTrack(None, PlatformReadIssue(index, PlatformReadIssueKind.UNAVAILABLE))
     title = value.get("name")
     artists = value.get("artists")
+    duration_ms = value.get("duration_ms")
     if (
         not isinstance(track_id, str)
         or not track_id
@@ -317,6 +356,9 @@ def _parse_track(value: object, index: int, *, wrapper_local: object) -> _Parsed
         or not title.strip()
         or not isinstance(artists, list)
         or not artists
+        or (duration_ms is not None and (
+            isinstance(duration_ms, bool) or not isinstance(duration_ms, int) or duration_ms < 0
+        ))
     ):
         return _ParsedTrack(None, PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
     artist_names: list[str] = []
@@ -336,17 +378,26 @@ def _parse_track(value: object, index: int, *, wrapper_local: object) -> _Parsed
         if not isinstance(candidate, str) or not candidate:
             return _ParsedTrack(None, PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
         linked_from_id = candidate
-    return _ParsedTrack(
-        PlatformTrackIdentity(
-            identity_id=f"spotify:{track_id}",
-            provider=IdentityProvider.SPOTIFY,
-            provider_track_id=track_id,
-            title=title,
-            artists=tuple(artist_names),
-            linked_from_provider_track_id=linked_from_id,
-        ),
-        None,
-    )
+    isrc: str | None = None
+    external_ids = value.get("external_ids")
+    if external_ids is not None:
+        if not isinstance(external_ids, dict):
+            return _ParsedTrack(None, PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
+        candidate_isrc = external_ids.get("isrc")
+        if candidate_isrc is not None:
+            if not isinstance(candidate_isrc, str) or not candidate_isrc.strip():
+                return _ParsedTrack(None, PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
+            isrc = candidate_isrc
+    try:
+        identity = PlatformTrackIdentity(
+            identity_id=f"spotify:{track_id}", provider=IdentityProvider.SPOTIFY,
+            provider_track_id=track_id, title=title, artists=tuple(artist_names),
+            linked_from_provider_track_id=linked_from_id, duration_ms=duration_ms, isrc=isrc,
+        )
+
+    except ValueError:
+        return _ParsedTrack(None, PlatformReadIssue(index, PlatformReadIssueKind.MALFORMED))
+    return _ParsedTrack(identity, None)
 
 
 def _next_cursor(payload: dict[str, object], offset: int, item_count: int) -> str | None:
@@ -426,6 +477,19 @@ def _parse_retry_after(value: str | None, now: datetime) -> float | None:
     return seconds
 
 
+def _parse_retry_after_seconds(value: str | None) -> int | None:
+    """Expose only a valid non-negative integral Retry-After value."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text or not text.isascii() or not text.isdigit():
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 def _fallback_delay(attempt: int) -> float:
     return float(min(attempt, 2))
 
@@ -473,6 +537,14 @@ def _validate_playlist_id(playlist_id: str) -> None:
         raise SpotifyAdapterError(
             SpotifyErrorKind.CONFIGURATION,
             "Spotify playlist ID is invalid",
+        )
+
+
+def _validate_track_id(track_id: str) -> None:
+    if not _PLAYLIST_ID.fullmatch(track_id):
+        raise SpotifyAdapterError(
+            SpotifyErrorKind.CONFIGURATION,
+            "Spotify track ID is invalid",
         )
 
 
