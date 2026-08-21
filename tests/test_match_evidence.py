@@ -15,6 +15,7 @@ from spotify_playlist_taxonomy.domain.models import IdentityProvider, PlatformTr
 from spotify_playlist_taxonomy.persistence import apply_migrations, connect_database
 from spotify_playlist_taxonomy.persistence.database import load_migrations
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
+from spotify_playlist_taxonomy.persistence.identity_external_evidence import IdentityExternalEntityEvidence, IdentityExternalEvidenceStore
 from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceService
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
@@ -66,20 +67,25 @@ class MatchEvidenceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close(); self.temp.cleanup()
 
-    def test_schema_sixteen_adds_deterministic_provenance_to_schema_fifteen(self) -> None:
+    def test_schema_seventeen_migrates_schema_sixteen_and_fresh_database(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             connection = connect_database(Path(directory) / "older.db")
             migrations = load_migrations()
             connection.execute("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)")
-            for migration in migrations[:14]:
+            for migration in migrations[:16]:
                 connection.executescript(migration.sql)
                 connection.execute("INSERT INTO schema_migrations VALUES (?, ?, ?, 'now')", (migration.version, migration.name, migration.checksum))
             connection.commit()
-            self.assertEqual(16, apply_migrations(connection))
-            columns = {row[1] for row in connection.execute("PRAGMA table_info(track_identities)")}
-            self.assertTrue({"duration_ms", "isrc"}.issubset(columns))
-            self.assertIn("deterministic_match_decisions", {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")})
+            self.assertEqual(17, apply_migrations(connection))
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertIn("identity_external_entity_evidence", tables)
+            self.assertIn("deterministic_match_decisions", tables)
             connection.close()
+        self.assertEqual(17, apply_migrations(self.connection))
+        self.assertIn(
+            "identity_external_entity_evidence",
+            {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")},
+        )
 
     def test_analysis_is_read_only_and_counts_pairs_without_selecting_one(self) -> None:
         before = self.connection.total_changes
@@ -293,6 +299,66 @@ class MatchEvidenceTests(unittest.TestCase):
                 self.assertEqual(inconsistent, "comparison_inconsistent" in tier.blocked_reasons)
                 self.assertEqual(inconsistent, not grouped[0].comparison_consistent)
 
+    def test_identity_external_evidence_round_trips_states_upserts_and_isolates(self) -> None:
+        store = IdentityExternalEvidenceStore(self.connection)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic-query", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2026-02-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        resolved = IdentityExternalEntityEvidence("external.a", "identity.unresolved", external_id="ABCDEFAB-CDEF-CDEF-CDEF-ABCDEFABCDEF", lookup_state="resolved", **base)
+        store.upsert(resolved); store.upsert(resolved)
+        rows = store.for_identities(("identity.unresolved",))
+        self.assertEqual(1, len(rows))
+        self.assertEqual("abcdefab-cdef-cdef-cdef-abcdefabcdef", rows[0].external_id)
+        self.assertEqual(("identity.unresolved", "musicbrainz", "recording", "resolved", "isrc", "synthetic-query", "synthetic.v1", "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z"), (rows[0].identity_id, rows[0].provider, rows[0].entity_type, rows[0].lookup_state, rows[0].lookup_method, rows[0].query_fingerprint, rows[0].adapter_version, rows[0].retrieved_at, rows[0].fresh_until))
+        ambiguous = IdentityExternalEntityEvidence(
+            "external.b",
+            "identity.linked.a",
+            external_id=None,
+            lookup_state="ambiguous",
+            **(base | {"ambiguity_count": 2, "ambiguity_digest": "synthetic-digest"}),
+        )
+        store.upsert(ambiguous)
+        self.assertEqual(("identity.linked.a",), tuple(row.identity_id for row in store.for_identities(("identity.linked.a",))))
+        self.assertEqual((2, "synthetic-digest"), (store.for_identities(("identity.linked.a",))[0].ambiguity_count, store.for_identities(("identity.linked.a",))[0].ambiguity_digest))
+        self.assertEqual(2, len(store.for_identities(("identity.unresolved", "identity.linked.a"))))
+        self.assertEqual((), store.for_identities(()))
+        self.assertEqual((), store.for_identities(("identity.linked.b",)))
+        for state in ("not_found", "insufficient_input", "lookup_failed", "stale"):
+            store.upsert(IdentityExternalEntityEvidence("external." + state, "identity.linked.a", external_id=None, lookup_state=state, **base))
+            self.assertEqual(state, store.for_identities(("identity.linked.a",))[0].lookup_state)
+        with self.assertRaises(Exception):
+            store.upsert(IdentityExternalEntityEvidence("bad", "identity.unresolved", external_id=None, lookup_state="resolved", **base))
+        with self.assertRaises(Exception):
+            store.upsert(IdentityExternalEntityEvidence("bad-count", "identity.unresolved", external_id=None, lookup_state="ambiguous", ambiguity_count=-1, **base))
+        with self.assertRaises(Exception):
+            store.upsert(IdentityExternalEntityEvidence("bad-state", "identity.unresolved", external_id="ABCDEFAB-CDEF-CDEF-CDEF-ABCDEFABCDEF", lookup_state="not_found", **base))
+
+    def test_identity_external_evidence_cascades_without_matching_mutation(self) -> None:
+        store = IdentityExternalEvidenceStore(self.connection)
+        self.connection.execute("INSERT INTO track_identities(identity_id, provider, provider_track_id, title, normalized_title, version_label, created_at, duration_ms, isrc) VALUES ('identity.purge', 'spotify', 'provider.purge', 'Synthetic purge', 'synthetic purge', NULL, 'now', NULL, NULL)")
+        self.connection.commit()
+        item = IdentityExternalEntityEvidence("external.purge", "identity.purge", "musicbrainz", "recording", None, "not_found", "isrc", "synthetic-query", "synthetic.v1", "2026-01-01T00:00:00Z", None, None, None)
+        unrelated = IdentityExternalEntityEvidence("external.unrelated", "identity.unresolved", "musicbrainz", "recording", None, "not_found", "isrc", "synthetic-query", "synthetic.v1", "2026-01-01T00:00:00Z", None, None, None)
+        before = tuple(self.connection.execute("SELECT canonical_track_id, identity_id FROM account_canonical_identity_links ORDER BY canonical_track_id, identity_id"))
+        candidates = tuple(self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id"))
+        decisions = tuple(self.connection.execute("SELECT candidate_id FROM deterministic_match_decisions ORDER BY candidate_id"))
+        store.upsert(unrelated)
+        store.upsert(item)
+        self.assertEqual((item,), store.for_identities(("identity.purge",)))
+        self.connection.execute("DELETE FROM track_identities WHERE identity_id='identity.purge'")
+        self.connection.commit()
+        self.assertEqual((), store.for_identities(("identity.purge",)))
+        self.assertEqual(before, tuple(self.connection.execute("SELECT canonical_track_id, identity_id FROM account_canonical_identity_links ORDER BY canonical_track_id, identity_id")))
+        self.assertEqual(candidates, tuple(self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id")))
+        self.assertEqual(decisions, tuple(self.connection.execute("SELECT candidate_id FROM deterministic_match_decisions ORDER BY candidate_id")))
+        self.assertEqual(("identity.unresolved",), tuple(row.identity_id for row in store.for_identities(("identity.unresolved", "identity.linked.a", "identity.purge"))))
+
+    def test_identity_external_evidence_schema_is_minimal_and_network_free(self) -> None:
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(identity_external_entity_evidence)")}
+        self.assertFalse(columns.intersection({"raw_response", "response_body", "artwork", "release_metadata", "title", "artist", "album", "payload_json"}))
+        self.assertEqual(
+            "CASCADE",
+            self.connection.execute("PRAGMA foreign_key_list(identity_external_entity_evidence)").fetchone()[6],
+        )
+
     def test_grouped_evidence_cli_renders_complete_synthetic_evidence(self) -> None:
         database = Path(self.temp.name) / "app.db"
         data_dir = Path(self.temp.name) / "grouped-runtime"; (data_dir / "state").mkdir(parents=True)
@@ -329,8 +395,8 @@ class MatchEvidenceTests(unittest.TestCase):
             initialized = runner.invoke(app, ["db", "init", *args])
             self.assertEqual(0, initialized.exit_code, initialized.output)
             connection = connect_database(database)
-            self.assertEqual(16, apply_migrations(connection))
-            self.assertEqual(1, connection.execute("SELECT COUNT(*) FROM schema_migrations WHERE version=16").fetchone()[0])
+            self.assertEqual(17, apply_migrations(connection))
+            self.assertEqual(1, connection.execute("SELECT COUNT(*) FROM schema_migrations WHERE version=17").fetchone()[0])
             self.assertEqual("Synthetic", connection.execute("SELECT display_title FROM canonical_tracks WHERE canonical_track_id='canonical.synthetic.pre15'").fetchone()[0])
             columns = {row[1] for row in connection.execute("PRAGMA table_info(track_identities)")}
             self.assertTrue({"duration_ms", "isrc"}.issubset(columns))
