@@ -76,7 +76,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence_review import (
     MatchEvidenceReviewService,
 )
 from spotify_playlist_taxonomy.workflows.external_recording_targets import (
-    ExternalRecordingTargetProjectionService,
+    ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService,
 )
 from spotify_playlist_taxonomy.workflows.deterministic_match import (
     TIER_A_POLICY_ID, TierAEligibilityService,
@@ -1112,6 +1112,42 @@ def catalogue_match_external_recording_preview(
                 f"lookup_reason: {item.lookup_reason}\n"
             )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_match_external_recording_app.command("fetch")
+def catalogue_match_external_recording_fetch(
+    limit: int = typer.Option(..., "--limit", min=1, max=100),
+    yes: bool = typer.Option(False, "--yes"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Explicitly fetch bounded MusicBrainz ISRC recording evidence for current targets."""
+    try:
+        config_path = config_path.resolve()
+        with _phase3_store(config_path, data_dir) as (config, _, store):
+            if current_schema_version(store.connection) < 17:
+                raise PersistenceError("database requires migration 17; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            policy = _load_research_policy(config_path, config)
+            provider_policy = next(item for item in policy.providers if item.provider_id == "musicbrainz" and item.enabled)
+            service = ExternalRecordingEvidenceFetchService(
+                store, binding.binding_id, positive_ttl_hours=policy.positive_ttl_hours,
+                negative_ttl_hours=policy.negative_ttl_hours, ambiguous_ttl_hours=policy.ambiguous_ttl_hours,
+            )
+            selected = service.plan(limit)
+            preview = ExternalRecordingTargetProjectionService(store, binding.binding_id).preview()
+            _safe_echo(f"eligible_lookup_targets: {preview.requires_lookup_count}\nselected_targets: {len(selected)}\nprovider: musicbrainz\nentity_type: recording\nlookup_method: isrc\nnetwork_access: yes\nmatching_mutation: no")
+            if not yes and not typer.confirm("Fetch bounded MusicBrainz Recording evidence for selected identities?"):
+                raise typer.Abort()
+            with httpx.Client(timeout=policy.request_timeout_seconds, verify=True, follow_redirects=False, trust_env=False) as client:
+                report = service.fetch(limit, MusicBrainzResearchProvider(client=client, policy=provider_policy))
+        for name in ("planned", "processed", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh"):
+            _safe_echo(f"{name}: {getattr(report, name)}")
+        _safe_echo("matching_mutations: 0")
+    except (OSError, StopIteration, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
         _fail(error)
 
 

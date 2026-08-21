@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import httpx
@@ -29,6 +30,20 @@ def _fingerprint(value: object) -> str:
 
 def _normalized(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+_MBID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_ISRC = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{7}$")
+
+
+@dataclass(frozen=True, slots=True)
+class MusicBrainzRecordingLookupResult:
+    normalized_isrc: str
+    recording_ids: tuple[str, ...]
+    query_fingerprint: str
+    adapter_version: str
+    retrieved_at: str
+    failure_category: str | None = None
 
 
 def _retry_after(response: httpx.Response) -> float | None:
@@ -108,6 +123,35 @@ class MusicBrainzResearchProvider:
         return ResearchResult(request.request_id, "musicbrainz", self.policy.adapter_version,
                               query_id, query_fingerprint, _now(), ProviderOutcomeStatus.SUCCESS,
                               assertions)
+
+    def lookup_recordings_by_isrc(self, isrc: str) -> MusicBrainzRecordingLookupResult:
+        """Return only normalized Recording IDs for one ISRC relationship lookup."""
+        normalized_isrc = isrc.strip().replace("-", "").upper()
+        if not _ISRC.fullmatch(normalized_isrc):
+            raise ValueError("ISRC must be normalized before MusicBrainz lookup")
+        path = f"{self.policy.api_url.rstrip('/')}/isrc/{normalized_isrc}"
+        params = {"fmt": "json"}
+        fingerprint = _fingerprint({"url": path, "params": params})
+        response = self._request(path, params)
+        if isinstance(response, ResearchResult):
+            category = response.error_category
+            if response.status is ProviderOutcomeStatus.NO_RESULT:
+                return MusicBrainzRecordingLookupResult(normalized_isrc, (), fingerprint, self.policy.adapter_version, response.retrieved_at)
+            return MusicBrainzRecordingLookupResult(normalized_isrc, (), fingerprint, self.policy.adapter_version, response.retrieved_at, category or "provider_failure")
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            return MusicBrainzRecordingLookupResult(normalized_isrc, (), fingerprint, self.policy.adapter_version, _now(), "invalid_response")
+        recordings = payload.get("recordings") if isinstance(payload, dict) else None
+        if not isinstance(recordings, list):
+            return MusicBrainzRecordingLookupResult(normalized_isrc, (), fingerprint, self.policy.adapter_version, _now(), "invalid_response")
+        values: set[str] = set()
+        for recording in recordings:
+            value = recording.get("id") if isinstance(recording, dict) else None
+            if not isinstance(value, str) or not _MBID.fullmatch(value):
+                return MusicBrainzRecordingLookupResult(normalized_isrc, (), fingerprint, self.policy.adapter_version, _now(), "invalid_response")
+            values.add(value.lower())
+        return MusicBrainzRecordingLookupResult(normalized_isrc, tuple(sorted(values)), fingerprint, self.policy.adapter_version, _now())
 
     def _request(self, url: str, params: dict[str, str]) -> httpx.Response | ResearchResult:
         try:

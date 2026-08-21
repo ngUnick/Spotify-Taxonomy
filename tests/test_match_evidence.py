@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from spotify_playlist_taxonomy.cli import app
 from spotify_playlist_taxonomy.adapters.spotify.errors import SpotifyAdapterError, SpotifyErrorKind
 from spotify_playlist_taxonomy.adapters.spotify.reader import SpotifyRecordingEvidence
+from spotify_playlist_taxonomy.adapters.research.musicbrainz import MusicBrainzRecordingLookupResult
 from spotify_playlist_taxonomy.domain.ingestion import StagedSourceEntry
 from spotify_playlist_taxonomy.domain.models import IdentityProvider, PlatformTrackIdentity
 from spotify_playlist_taxonomy.persistence import apply_migrations, connect_database
@@ -21,7 +22,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceServ
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
-from spotify_playlist_taxonomy.workflows.external_recording_targets import ExternalRecordingTargetProjectionService
+from spotify_playlist_taxonomy.workflows.external_recording_targets import ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -424,6 +425,47 @@ class MatchEvidenceTests(unittest.TestCase):
         verification = connect_database(data_dir / "state" / "app.db")
         self.assertEqual(expected_candidates, verification.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall())
         verification.close()
+
+    def test_external_recording_fetch_is_bounded_persists_evidence_and_preserves_matching(self) -> None:
+        self.connection.execute("UPDATE track_identities SET isrc=NULL WHERE identity_id='identity.linked.b'")
+        self.connection.commit()
+        candidates = self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall()
+        class Lookup:
+            calls: list[str] = []
+            def lookup_recordings_by_isrc(self, isrc: str) -> MusicBrainzRecordingLookupResult:
+                self.calls.append(isrc)
+                ids = ("abcdefab-cdef-cdef-cdef-abcdefabcdef",) if isrc == "USRC17607839" else ()
+                return MusicBrainzRecordingLookupResult(isrc, ids, "synthetic-fingerprint", "synthetic.v1", "2026-01-01T00:00:00Z")
+        lookup = Lookup()
+        service = ExternalRecordingEvidenceFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        report = service.fetch(3, lookup)
+        self.assertEqual((3, 3, 2, 0, 0, 1, 0, 0), (report.planned, report.processed, report.resolved, report.ambiguous, report.not_found, report.insufficient_input, report.lookup_failed, report.skipped_fresh))
+        self.assertEqual(("USRC17607839", "USRC17607839"), tuple(lookup.calls))
+        rows = IdentityExternalEvidenceStore(self.connection).for_identities(("identity.linked.a", "identity.linked.b", "identity.unresolved"))
+        self.assertEqual(("resolved", "insufficient_input", "resolved"), tuple(item.lookup_state for item in rows))
+        self.assertEqual(candidates, self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall())
+
+    def test_external_recording_fetch_cli_requires_confirmation_and_is_bounded(self) -> None:
+        database = Path(self.temp.name) / "app.db"
+        data_dir = Path(self.temp.name) / "external-recording-fetch-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        args = ["catalogue", "match", "external-recording", "fetch", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)]
+        declined = CliRunner().invoke(app, args, input="n\n")
+        self.assertNotEqual(0, declined.exit_code)
+        self.assertIn("network_access: yes", declined.output)
+        verification = connect_database(data_dir / "state" / "app.db")
+        self.assertEqual(0, verification.execute("SELECT COUNT(*) FROM identity_external_entity_evidence").fetchone()[0])
+        verification.close()
+        class FakeProvider:
+            def __init__(self, **_: object) -> None: pass
+            def lookup_recordings_by_isrc(self, isrc: str) -> MusicBrainzRecordingLookupResult:
+                return MusicBrainzRecordingLookupResult(isrc, ("abcdefab-cdef-cdef-cdef-abcdefabcdef",), "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z")
+        with patch("spotify_playlist_taxonomy.cli.MusicBrainzResearchProvider", FakeProvider):
+            accepted = CliRunner().invoke(app, [*args, "--yes"])
+        self.assertEqual(0, accepted.exit_code, accepted.output)
+        self.assertIn("planned: 1", accepted.output)
+        self.assertIn("matching_mutations: 0", accepted.output)
+        self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "fetch", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
 
     def test_grouped_evidence_cli_renders_complete_synthetic_evidence(self) -> None:
         database = Path(self.temp.name) / "app.db"

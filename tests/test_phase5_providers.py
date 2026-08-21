@@ -333,6 +333,29 @@ class ProviderAdapterTests(unittest.TestCase):
         self.assertEqual("transport_error", result.error_category)
         self.assertNotIn("secret-token", repr(result))
 
+    def test_musicbrainz_isrc_lookup_normalizes_deduplicates_and_orders_recordings(self) -> None:
+        other = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        requests: list[httpx.Request] = []
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"recordings": [{"id": other.upper()}, {"id": MBID}, {"id": other}]})
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            result = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy).lookup_recordings_by_isrc("us-rc1-76-07839")
+        self.assertEqual("USRC17607839", result.normalized_isrc)
+        self.assertEqual((MBID, other), result.recording_ids)
+        self.assertIsNone(result.failure_category)
+        self.assertEqual("/ws/2/isrc/USRC17607839", requests[0].url.path)
+        self.assertNotIn("recordings", repr(result))
+
+    def test_musicbrainz_isrc_lookup_fails_closed_for_malformed_or_provider_failure(self) -> None:
+        with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"recordings": [{"id": "not-a-mbid"}]}))) as client:
+            malformed = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy).lookup_recordings_by_isrc("USRC17607839")
+        self.assertEqual((), malformed.recording_ids)
+        self.assertEqual("invalid_response", malformed.failure_category)
+        with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(503))) as client:
+            failed = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy).lookup_recordings_by_isrc("USRC17607839")
+        self.assertEqual("provider_temporarily_unavailable", failed.failure_category)
+
     def test_policy_rejects_unapproved_endpoint_and_unknown_provider(self) -> None:
         payload = self.musicbrainz_policy.model_dump(mode="json")
         payload["api_url"] = "https://example.invalid/ws"
