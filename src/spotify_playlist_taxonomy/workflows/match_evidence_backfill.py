@@ -9,6 +9,7 @@ from spotify_playlist_taxonomy.adapters.spotify.errors import SpotifyAdapterErro
 from spotify_playlist_taxonomy.adapters.spotify.reader import SpotifyRecordingEvidence
 from spotify_playlist_taxonomy.domain.models import IdentityProvider, PlatformTrackIdentity
 from spotify_playlist_taxonomy.persistence.phase3 import AccountMismatchError, Phase3Store
+from spotify_playlist_taxonomy.workflows.match_topology import UnresolvedMatchTopologyService
 
 
 class RecordingEvidenceReader(Protocol):
@@ -116,28 +117,17 @@ class MatchEvidenceBackfillService:
             raise AccountMismatchError("authenticated Spotify account does not match the active local account binding")
 
     def _targets(self) -> tuple[_Target, ...]:
+        topology = UnresolvedMatchTopologyService(self._store, self._binding_id).candidates()
+        identity_ids = tuple(sorted({
+            identity_id for item in topology
+            for identity_id in (item.identity_id, *item.comparison_identity_ids)
+        }))
+        if not identity_ids:
+            return ()
+        placeholders = ",".join("?" for _ in identity_ids)
         rows = self._store.connection.execute(
-            """
-            WITH candidate_identities AS (
-                SELECT c.identity_id
-                FROM canonical_match_candidates AS c
-                WHERE c.account_binding_id = ? AND c.action = 'link_existing'
-                  AND c.state = 'ambiguous'
-                UNION
-                SELECT l.identity_id
-                FROM canonical_match_candidates AS c
-                JOIN account_canonical_identity_links AS l
-                  ON l.account_binding_id = c.account_binding_id
-                 AND l.canonical_track_id = c.canonical_track_id
-                WHERE c.account_binding_id = ? AND c.action = 'link_existing'
-                  AND c.state = 'ambiguous'
-            )
-            SELECT i.identity_id, i.provider_track_id, i.duration_ms, i.isrc
-            FROM track_identities AS i
-            JOIN candidate_identities AS selected ON selected.identity_id = i.identity_id
-            WHERE i.provider = 'spotify'
-            ORDER BY i.identity_id
-            """,
-            (self._binding_id, self._binding_id),
+            f"SELECT identity_id, provider_track_id, duration_ms, isrc FROM track_identities "
+            f"WHERE provider = 'spotify' AND identity_id IN ({placeholders}) ORDER BY identity_id",
+            identity_ids,
         ).fetchall()
         return tuple(_Target(row["identity_id"], row["provider_track_id"], row["duration_ms"], row["isrc"]) for row in rows)

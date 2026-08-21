@@ -2,6 +2,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from contextlib import nullcontext
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +21,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceServ
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
+from spotify_playlist_taxonomy.workflows.external_recording_targets import ExternalRecordingTargetProjectionService
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -358,6 +360,70 @@ class MatchEvidenceTests(unittest.TestCase):
             "CASCADE",
             self.connection.execute("PRAGMA foreign_key_list(identity_external_entity_evidence)").fetchone()[6],
         )
+
+    def test_external_recording_target_projection_reuses_current_topology_and_deduplicates(self) -> None:
+        self.connection.execute("INSERT INTO track_identities(identity_id, provider, provider_track_id, title, normalized_title, version_label, created_at, duration_ms, isrc) VALUES ('identity.second', 'spotify', 'provider.second', 'Synthetic second', 'synthetic second', NULL, 'now', 100000, 'USRC17607839')")
+        self.connection.execute("INSERT INTO account_track_identity_state(account_binding_id, identity_id, first_seen_scan_id, first_seen_source_id, first_published_scan_id, first_published_source_id, preexisting, last_observed_at) VALUES (?, 'identity.second', 'scan.synthetic', 'source.synthetic', 'scan.synthetic', 'source.synthetic', 0, 'now')", (self.binding.binding_id,))
+        self.connection.execute("INSERT INTO canonical_match_candidates(candidate_id, account_binding_id, identity_id, canonical_track_id, action, state, confidence, basis_json, matcher_version, input_fingerprint, candidate_key, created_at) VALUES ('candidate.second', ?, 'identity.second', 'canonical.synthetic', 'link_existing', 'ambiguous', .5, '[]', 'synthetic.v1', 'fingerprint.second', 'key.second', 'later')", (self.binding.binding_id,))
+        self.connection.execute("INSERT INTO canonical_match_candidates(candidate_id, account_binding_id, identity_id, canonical_track_id, action, state, confidence, basis_json, matcher_version, input_fingerprint, candidate_key, created_at) VALUES ('candidate.paired', ?, 'identity.unresolved', NULL, 'create_new', 'ambiguous', .5, '[]', 'synthetic.v1', 'fingerprint.paired', 'key.paired', 'later')", (self.binding.binding_id,))
+        self.connection.execute("INSERT INTO canonical_match_candidates(candidate_id, account_binding_id, identity_id, canonical_track_id, action, state, confidence, basis_json, matcher_version, input_fingerprint, candidate_key, created_at) VALUES ('candidate.resolved', ?, 'identity.linked.a', 'canonical.synthetic', 'link_existing', 'ambiguous', .5, '[]', 'synthetic.v1', 'fingerprint.resolved', 'key.resolved', 'later')", (self.binding.binding_id,))
+        self.connection.commit()
+        before = self.connection.total_changes
+        preview = ExternalRecordingTargetProjectionService(self.store, self.binding.binding_id).preview()
+        self.assertEqual(2, preview.current_candidate_count)
+        self.assertEqual(2, preview.unique_candidate_identity_count)
+        self.assertEqual(2, preview.unique_comparison_identity_count)
+        self.assertEqual(4, preview.unique_target_identity_count)
+        self.assertEqual(0, preview.candidate_and_comparison_overlap)
+        self.assertEqual(("identity.linked.a", "identity.linked.b", "identity.second", "identity.unresolved"), tuple(item.identity_id for item in preview.targets))
+        self.assertEqual(("candidate",), preview.targets[-1].roles)
+        self.assertEqual(("comparison",), preview.targets[0].roles)
+        self.assertEqual(before, self.connection.total_changes)
+
+    def test_external_recording_target_projection_classifies_evidence_without_mutation(self) -> None:
+        store = IdentityExternalEvidenceStore(self.connection)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="synthetic", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        store.upsert(IdentityExternalEntityEvidence("ext.resolved", "identity.unresolved", external_id="ABCDEFAB-CDEF-CDEF-CDEF-ABCDEFABCDEF", lookup_state="resolved", fresh_until="2099-01-01T00:00:00Z", **base))
+        store.upsert(IdentityExternalEntityEvidence("ext.ambiguous", "identity.linked.a", external_id=None, lookup_state="ambiguous", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=2, ambiguity_digest="synthetic", **{key: value for key, value in base.items() if key not in {"ambiguity_count", "ambiguity_digest"}}))
+        store.upsert(IdentityExternalEntityEvidence("ext.stale", "identity.linked.b", external_id=None, lookup_state="not_found", fresh_until="2020-01-01T00:00:00Z", **base))
+        self.connection.execute("INSERT INTO identity_external_entity_evidence VALUES ('ext.other', 'identity.linked.b', 'other', 'recording', NULL, 'not_found', 'synthetic', 'synthetic', 'synthetic.v1', '2026-01-01T00:00:00Z', NULL, NULL, NULL)")
+        self.connection.commit()
+        before = self.connection.total_changes
+        preview = ExternalRecordingTargetProjectionService(self.store, self.binding.binding_id).preview()
+        targets = {item.identity_id: item for item in preview.targets}
+        self.assertEqual(("fresh_resolved", False, "abcdefab-cdef-cdef-cdef-abcdefabcdef"), (targets["identity.unresolved"].evidence_state, targets["identity.unresolved"].requires_lookup, targets["identity.unresolved"].external_recording_id))
+        self.assertEqual(("fresh_ambiguous", False), (targets["identity.linked.a"].evidence_state, targets["identity.linked.a"].requires_lookup))
+        self.assertEqual(("stale", True), (targets["identity.linked.b"].evidence_state, targets["identity.linked.b"].requires_lookup))
+        for state, expected_state, requires_lookup in (
+            ("not_found", "fresh_not_found", False),
+            ("insufficient_input", "fresh_insufficient_input", False),
+            ("lookup_failed", "fresh_lookup_failed", False),
+            ("stale", "stale", True),
+        ):
+            with self.subTest(state=state):
+                item = IdentityExternalEntityEvidence("ext." + state, "identity.synthetic", "musicbrainz", "recording", None, state, "synthetic", "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z", "2099-01-01T00:00:00Z", None, None)
+                target = ExternalRecordingTargetProjectionService._target("identity.synthetic", 1, 0, item, datetime.now(UTC))
+                self.assertEqual((expected_state, requires_lookup), (target.evidence_state, target.requires_lookup))
+        self.assertEqual(before, self.connection.total_changes)
+
+    def test_external_recording_preview_cli_is_bounded_deterministic_and_read_only(self) -> None:
+        database = Path(self.temp.name) / "app.db"
+        data_dir = Path(self.temp.name) / "external-recording-runtime"; (data_dir / "state").mkdir(parents=True)
+        expected_candidates = self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall()
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        args = ["catalogue", "match", "external-recording", "preview", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)]
+        first = CliRunner().invoke(app, args)
+        second = CliRunner().invoke(app, args)
+        self.assertEqual(0, first.exit_code, first.output)
+        self.assertEqual(first.output, second.output)
+        self.assertIn("current_candidates: 1", first.output)
+        self.assertIn("unique_target_identities: 3", first.output)
+        self.assertEqual(1, sum(line.startswith("identity_id:") for line in first.output.splitlines()))
+        self.assertNotEqual(0, CliRunner().invoke(app, [*args[:5], "--limit", "0", *args[5:]]).exit_code)
+        self.assertNotEqual(0, CliRunner().invoke(app, [*args[:5], "--limit", "101", *args[5:]]).exit_code)
+        verification = connect_database(data_dir / "state" / "app.db")
+        self.assertEqual(expected_candidates, verification.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall())
+        verification.close()
 
     def test_grouped_evidence_cli_renders_complete_synthetic_evidence(self) -> None:
         database = Path(self.temp.name) / "app.db"

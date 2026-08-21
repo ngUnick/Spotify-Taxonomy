@@ -75,6 +75,9 @@ from spotify_playlist_taxonomy.workflows.match_evidence_review import (
     ANOMALY_CATEGORIES,
     MatchEvidenceReviewService,
 )
+from spotify_playlist_taxonomy.workflows.external_recording_targets import (
+    ExternalRecordingTargetProjectionService,
+)
 from spotify_playlist_taxonomy.workflows.deterministic_match import (
     TIER_A_POLICY_ID, TierAEligibilityService,
 )
@@ -106,6 +109,7 @@ catalogue_app = typer.Typer(no_args_is_help=True, help="Review the local canonic
 catalogue_identity_app = typer.Typer(no_args_is_help=True, help="Inspect account-scoped track identities.")
 catalogue_match_app = typer.Typer(no_args_is_help=True, help="Review canonical matching candidates.")
 catalogue_match_deterministic_app = typer.Typer(no_args_is_help=True, help="Read-only deterministic match-policy analysis.")
+catalogue_match_external_recording_app = typer.Typer(no_args_is_help=True, help="Preview local external-recording evidence targets.")
 catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit canonical identity links.")
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
 derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characteristics from persisted evidence.")
@@ -135,6 +139,7 @@ app.add_typer(catalogue_app, name="catalogue")
 catalogue_app.add_typer(catalogue_identity_app, name="identity")
 catalogue_app.add_typer(catalogue_match_app, name="match")
 catalogue_match_app.add_typer(catalogue_match_deterministic_app, name="deterministic")
+catalogue_match_app.add_typer(catalogue_match_external_recording_app, name="external-recording")
 catalogue_app.add_typer(catalogue_link_app, name="link")
 app.add_typer(research_app, name="research")
 app.add_typer(derive_app, name="derive")
@@ -1060,6 +1065,51 @@ def catalogue_match_evidence_list(
                 f"comparison_duration_ms: {item.comparison_duration_ms}\ncomparison_isrc: {item.comparison_isrc}\n"
                 f"duration_delta_ms: {item.duration_delta_ms}\ncategory: {item.category}\n"
                 f"paired_create_new_candidate_id: {item.paired_create_new_candidate_id or '-'}\n"
+            )
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_match_external_recording_app.command("preview")
+def catalogue_match_external_recording_preview(
+    limit: int = typer.Option(25, "--limit", min=1, max=100),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Preview local external-recording targets; it never contacts a provider or writes state."""
+    try:
+        with _phase3_store(config_path, data_dir) as (_, _, store):
+            if current_schema_version(store.connection) < 17:
+                raise PersistenceError("database requires migration 17; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            preview = ExternalRecordingTargetProjectionService(store, binding.binding_id).preview()
+        counts = dict(preview.evidence_state_counts)
+        for name, value in (
+            ("current_candidates", preview.current_candidate_count),
+            ("unique_candidate_identities", preview.unique_candidate_identity_count),
+            ("unique_comparison_identities", preview.unique_comparison_identity_count),
+            ("unique_target_identities", preview.unique_target_identity_count),
+            ("candidate_and_comparison_overlap", preview.candidate_and_comparison_overlap),
+            ("requires_lookup", preview.requires_lookup_count),
+            ("fresh_resolved", counts.get("fresh_resolved", 0)),
+            ("fresh_ambiguous", counts.get("fresh_ambiguous", 0)),
+            ("fresh_not_found", counts.get("fresh_not_found", 0)),
+            ("fresh_insufficient_input", counts.get("fresh_insufficient_input", 0)),
+            ("fresh_lookup_failed", counts.get("fresh_lookup_failed", 0)),
+            ("stale", counts.get("stale", 0)),
+            ("no_evidence", counts.get("no_evidence", 0)),
+        ):
+            typer.echo(f"{name}: {value}")
+        for item in preview.targets[:limit]:
+            _safe_echo(
+                f"identity_id: {item.identity_id}\nroles: {','.join(item.roles)}\n"
+                f"evidence_state: {item.evidence_state}\n"
+                f"external_recording_id: {item.external_recording_id or '-'}\n"
+                f"fresh: {str(item.is_fresh).lower()}\n"
+                f"requires_lookup: {str(item.requires_lookup).lower()}\n"
+                f"lookup_reason: {item.lookup_reason}\n"
             )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
         _fail(error)
