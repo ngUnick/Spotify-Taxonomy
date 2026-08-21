@@ -61,8 +61,14 @@ class MatchEvidenceService:
             else:
                 counts["multiple_comparison_identities"] += 1
             deltas: list[int] = []
+            same_values: list[bool] = []
+            conflicts: list[bool] = []
             for comparison in comparisons:
                 self._comparison(counts, unresolved, comparison, deltas)
+                if unresolved["isrc"] is not None and comparison["isrc"] is not None:
+                    same_values.append(unresolved["isrc"] == comparison["isrc"])
+                conflicts.append(_versions_conflict(version_cue(unresolved["version_label"], unresolved["title"]), version_cue(comparison["version_label"], comparison["title"])))
+            self._candidate_counts(counts, len(comparisons), deltas, same_values, conflicts)
             if deltas:
                 counts["candidate_any_duration_le_1s"] += int(any(value <= 1000 for value in deltas))
                 counts["candidate_all_duration_le_1s"] += int(all(value <= 1000 for value in deltas))
@@ -86,8 +92,47 @@ class MatchEvidenceService:
             "duration_le_1s_different_isrc", "same_isrc_version_conflict",
             "duration_gt_5s_same_isrc", "duration_gt_5s_no_version_conflict",
             "candidate_any_duration_le_1s", "candidate_all_duration_le_1s",
+            "same_isrc_duration_501_to_1000ms", "same_isrc_duration_1001_to_2000ms",
+            "same_isrc_duration_2001_to_5000ms", "same_isrc_duration_gt_5000ms",
+            "different_isrc_duration_le_500ms", "different_isrc_duration_501_to_1000ms",
+            "different_isrc_duration_1001_to_2000ms", "different_isrc_duration_2001_to_5000ms",
+            "different_isrc_duration_gt_5000ms",
+            "candidate_level_total_current_candidates", "candidate_level_comparison_count_1",
+            "candidate_level_comparison_count_gt_1", "candidate_level_max_comparison_count",
+            "candidate_level_all_comparisons_same_isrc", "candidate_level_any_isrc_mismatch",
+            "candidate_level_comparison_consistent", "candidate_level_comparison_inconsistent",
+            "candidate_level_version_explicit_conflict", "candidate_level_same_isrc_duration_le_500ms",
+            "candidate_level_same_isrc_duration_501_to_1000ms", "candidate_level_same_isrc_duration_1001_to_2000ms",
+            "candidate_level_same_isrc_duration_2001_to_5000ms", "candidate_level_same_isrc_duration_gt_5000ms",
+            "candidate_level_different_isrc_duration_le_500ms", "candidate_level_different_isrc_duration_501_to_1000ms",
+            "candidate_level_different_isrc_duration_1001_to_2000ms", "candidate_level_different_isrc_duration_2001_to_5000ms",
+            "candidate_level_different_isrc_duration_gt_5000ms", "candidate_level_multiple_comparisons_duration_band_mixed",
         )
         return MatchEvidenceReport(tuple((key, counts[key]) for key in keys))
+
+    @staticmethod
+    def _candidate_counts(counts: Counter[str], comparison_count: int, deltas: list[int], same: list[bool], conflicts: list[bool]) -> None:
+        counts["candidate_level_total_current_candidates"] += 1
+        counts["candidate_level_comparison_count_1" if comparison_count == 1 else "candidate_level_comparison_count_gt_1"] += 1
+        counts["candidate_level_max_comparison_count"] = max(counts["candidate_level_max_comparison_count"], comparison_count)
+        all_same = bool(same) and all(same)
+        mismatch = any(not value for value in same)
+        counts["candidate_level_all_comparisons_same_isrc"] += int(all_same)
+        counts["candidate_level_any_isrc_mismatch"] += int(mismatch)
+        conflict = any(conflicts)
+        counts["candidate_level_version_explicit_conflict"] += int(conflict)
+        inconsistent = comparison_count > 1 and (mismatch or conflict or (deltas and max(deltas) > 500))
+        counts["candidate_level_comparison_inconsistent" if inconsistent else "candidate_level_comparison_consistent"] += 1
+        if not deltas:
+            return
+        maximum = max(deltas)
+        prefix = "same_isrc" if all_same and not conflict else "different_isrc" if mismatch else None
+        if prefix is None:
+            return
+        suffix = "duration_le_500ms" if maximum <= 500 else "duration_501_to_1000ms" if maximum <= 1000 else "duration_1001_to_2000ms" if maximum <= 2000 else "duration_2001_to_5000ms" if maximum <= 5000 else "duration_gt_5000ms"
+        counts[f"candidate_level_{prefix}_{suffix}"] += 1
+        if comparison_count > 1 and len({0 if value <= 500 else 1 if value <= 1000 else 2 if value <= 2000 else 3 if value <= 5000 else 4 for value in deltas}) > 1:
+            counts["candidate_level_multiple_comparisons_duration_band_mixed"] += 1
 
     @staticmethod
     def _comparison(counts: Counter[str], unresolved: object, comparison: object, deltas: list[int]) -> None:
@@ -134,6 +179,16 @@ class MatchEvidenceService:
             if delta > 2000: counts["same_isrc_duration_gt_2s"] += 1
             if conflict: counts["same_isrc_version_conflict"] += 1
             if delta > 5000: counts["duration_gt_5s_same_isrc"] += 1
+            if 501 <= delta <= 1000: counts["same_isrc_duration_501_to_1000ms"] += 1
+            if 1001 <= delta <= 2000: counts["same_isrc_duration_1001_to_2000ms"] += 1
+            if 2001 <= delta <= 5000: counts["same_isrc_duration_2001_to_5000ms"] += 1
+            if delta > 5000: counts["same_isrc_duration_gt_5000ms"] += 1
+        elif unresolved["isrc"] is not None and comparison["isrc"] is not None:  # type: ignore[index]
+            if delta <= 500: counts["different_isrc_duration_le_500ms"] += 1
+            if 501 <= delta <= 1000: counts["different_isrc_duration_501_to_1000ms"] += 1
+            if 1001 <= delta <= 2000: counts["different_isrc_duration_1001_to_2000ms"] += 1
+            if 2001 <= delta <= 5000: counts["different_isrc_duration_2001_to_5000ms"] += 1
+            if delta > 5000: counts["different_isrc_duration_gt_5000ms"] += 1
         if delta <= 1000 and not conflict and not same_isrc and (
             unresolved["isrc"] is None or comparison["isrc"] is None  # type: ignore[index]
         ):

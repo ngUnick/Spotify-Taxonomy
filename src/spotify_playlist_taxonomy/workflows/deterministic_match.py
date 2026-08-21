@@ -18,6 +18,28 @@ TIER_A_DURATION_DELTA_MS = 500
 
 
 @dataclass(frozen=True, slots=True)
+class ComparisonConsistency:
+    comparison_count: int
+    all_same_isrc: bool
+    any_isrc_mismatch: bool
+    any_duration_over_threshold: bool
+    any_version_conflict: bool
+    comparison_inconsistent: bool
+
+
+def evaluate_comparison_consistency(
+    comparisons: tuple[tuple[bool, int | None, bool], ...],
+) -> ComparisonConsistency:
+    """Pure Tier A all-comparison consistency facts; no authority beyond reporting facts."""
+    count = len(comparisons)
+    mismatch = any(not same for same, _, _ in comparisons)
+    over = any(delta is None or delta > TIER_A_DURATION_DELTA_MS for _, delta, _ in comparisons)
+    conflict = any(conflict for _, _, conflict in comparisons)
+    return ComparisonConsistency(count, bool(comparisons) and not mismatch, mismatch, over, conflict,
+                                 count > 1 and (mismatch or over or conflict))
+
+
+@dataclass(frozen=True, slots=True)
 class TierAComparison:
     identity_id: str
     title: str
@@ -130,7 +152,11 @@ class TierAEligibilityService:
             elif _valid_duration(identity_duration) and comparison.duration_delta_ms is not None and comparison.duration_delta_ms > TIER_A_DURATION_DELTA_MS:
                 reasons.append("duration_over_threshold")
             if _versions_conflict(identity_cue, comparison.version_cue): reasons.append("version_conflict")
-        if len(comparisons) > 1 and any(reason in reasons for reason in ("isrc_mismatch", "duration_over_threshold", "version_conflict", "malformed_evidence", "duration_missing")):
+        consistency = evaluate_comparison_consistency(tuple(
+            (comparison.isrc == identity_isrc, comparison.duration_delta_ms,
+             _versions_conflict(identity_cue, comparison.version_cue)) for comparison in comparisons
+        ))
+        if consistency.comparison_inconsistent or (len(comparisons) > 1 and any(reason in reasons for reason in ("malformed_evidence", "duration_missing"))):
             reasons.append("comparison_inconsistent")
         return self._result(candidate_id, reasons, identity, canonical["canonical_track_id"], comparisons)
 

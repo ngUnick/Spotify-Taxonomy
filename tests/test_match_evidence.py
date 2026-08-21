@@ -18,7 +18,7 @@ from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceService
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
-from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService
+from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -231,6 +231,77 @@ class MatchEvidenceTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(("canonical-tier-a.v1", 1, 500), tuple(provenance))
         self.assertEqual(0, service.apply(("candidate.synthetic",)).confirmed)
+
+    def test_grouped_candidate_categories_are_read_only_and_expand_all_comparisons(self) -> None:
+        service = MatchEvidenceReviewService(self.store, self.binding.binding_id)
+        before = self.connection.total_changes
+        inconsistent = service.candidate_details("comparison-inconsistent", 1)
+        self.assertEqual(1, len(inconsistent))
+        self.assertEqual(2, len(inconsistent[0].comparisons))
+        self.assertFalse(inconsistent[0].comparison_consistent)
+        self.assertEqual(("identity.linked.a", "identity.linked.b"), tuple(x.comparison_identity_id for x in inconsistent[0].comparisons))
+        self.assertEqual(before, self.connection.total_changes)
+        self.assertEqual(1, len(service.candidate_details("multiple-comparisons", 1)))
+        self.assertEqual(0, len(service.candidate_details("multiple-comparisons-all-agree", 1)))
+
+    def test_grouped_candidate_all_agree_and_mixed_band_categories(self) -> None:
+        self.connection.execute("UPDATE track_identities SET isrc='USRC17607839', duration_ms=100400 WHERE identity_id='identity.linked.a'")
+        self.connection.execute("UPDATE track_identities SET isrc='USRC17607839', duration_ms=100700 WHERE identity_id='identity.linked.b'")
+        self.connection.commit()
+        service = MatchEvidenceReviewService(self.store, self.binding.binding_id)
+        self.assertEqual(0, len(service.candidate_details("multiple-comparisons-all-agree", 1)))
+        mixed = service.candidate_details("multiple-comparisons-duration-band-mixed", 1)
+        self.assertEqual(1, len(mixed)); self.assertTrue(mixed[0].duration_band_mixed)
+        self.connection.execute("UPDATE track_identities SET duration_ms=100450, version_label='live' WHERE identity_id='identity.linked.b'")
+        self.connection.commit()
+        self.assertEqual(1, len(service.candidate_details("multiple-comparisons-all-agree", 1)))
+        self.assertEqual(0, len(service.candidate_details("multiple-comparisons-duration-band-mixed", 1)))
+
+    def test_shared_comparison_consistency_scenarios(self) -> None:
+        scenarios = (
+            (((True, 500, False), (True, 250, False)), False, False, False, False),
+            (((True, 100, False), (False, 100, False)), True, True, False, False),
+            (((True, 100, False), (True, 501, False)), True, False, True, False),
+            (((True, 100, False), (True, 100, True)), True, False, False, True),
+        )
+        for evidence, inconsistent, mismatch, over, conflict in scenarios:
+            with self.subTest(evidence=evidence):
+                facts = evaluate_comparison_consistency(evidence)
+                self.assertEqual(2, facts.comparison_count)
+                self.assertEqual(inconsistent, facts.comparison_inconsistent)
+                self.assertEqual(mismatch, facts.any_isrc_mismatch)
+                self.assertEqual(over, facts.any_duration_over_threshold)
+                self.assertEqual(conflict, facts.any_version_conflict)
+
+    def test_shared_consistency_consumers_agree_for_fixture_scenarios(self) -> None:
+        tier_a = TierAEligibilityService(self.store, self.binding.binding_id)
+        evidence = MatchEvidenceReviewService(self.store, self.binding.binding_id)
+        cases = (
+            ("live", "USRC17607839", 100400, False),
+            ("live", "GBAYE6800011", 100100, True),
+            ("live", "USRC17607839", 100501, True),
+            ("acoustic", "USRC17607839", 100100, True),
+        )
+        for label, isrc, duration, inconsistent in cases:
+            with self.subTest(case=label):
+                self.connection.execute("UPDATE track_identities SET version_label=?, isrc=?, duration_ms=? WHERE identity_id='identity.linked.a'", (label, isrc, duration))
+                self.connection.execute("UPDATE track_identities SET version_label=?, isrc=?, duration_ms=? WHERE identity_id='identity.linked.b'", (label, isrc, duration))
+                self.connection.commit()
+                tier = tier_a.evaluate("candidate.synthetic")
+                category = "comparison-inconsistent" if inconsistent else "multiple-comparisons-all-agree"
+                grouped = evidence.candidate_details(category, 1)
+                self.assertEqual(inconsistent, "comparison_inconsistent" in tier.blocked_reasons)
+                self.assertEqual(inconsistent, not grouped[0].comparison_consistent)
+
+    def test_grouped_evidence_cli_renders_complete_synthetic_evidence(self) -> None:
+        database = Path(self.temp.name) / "app.db"
+        data_dir = Path(self.temp.name) / "grouped-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        result = CliRunner().invoke(app, ["catalogue", "match", "evidence-list", "--category", "comparison-inconsistent", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)])
+        self.assertEqual(0, result.exit_code, result.output)
+        for field in ("candidate_id:", "identity_id:", "identity:", "identity_version_cue: live", "identity_duration_ms:", "identity_isrc:", "canonical_id:", "comparison_count: 2", "comparison_consistent:", "comparison_inconsistent:", "min_duration_delta_ms:", "max_duration_delta_ms:", "duration_band_mixed:", "comparison_1_identity_id:", "comparison_1:", "comparison_1_version_cue:", "comparison_1_duration_ms:", "comparison_1_isrc:", "comparison_1_duration_delta_ms:", "comparison_1_same_isrc:", "comparison_1_duration_band:", "comparison_2_identity_id:", "comparison_2:", "comparison_2_version_cue:", "comparison_2_duration_ms:", "comparison_2_isrc:", "comparison_2_duration_delta_ms:", "comparison_2_same_isrc:", "comparison_2_duration_band:"):
+            self.assertIn(field, result.output)
+        self.assertEqual(1, sum(line.startswith("candidate_id:") for line in result.output.splitlines()))
 
     def test_identity_validation_normalizes_isrc_and_rejects_negative_duration(self) -> None:
         identity = PlatformTrackIdentity("identity.normalized", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), duration_ms=0, isrc="us-rc1-76-07839")

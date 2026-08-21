@@ -1039,7 +1039,15 @@ def catalogue_match_evidence_list(
             binding = store.active_account()
             if binding is None:
                 raise Phase3StateError("an active Spotify account binding is required")
-            rows = MatchEvidenceReviewService(store, binding.binding_id).anomalies(category, limit)
+            service = MatchEvidenceReviewService(store, binding.binding_id)
+            if category in {"comparison-inconsistent", "multiple-comparisons", "multiple-comparisons-all-agree", "multiple-comparisons-duration-band-mixed"}:
+                blocks = service.candidate_details(category, limit)
+                for block in blocks:
+                    identity = block.comparisons[0]
+                    _safe_echo(f"candidate_id: {block.candidate_id}\nidentity_id: {block.identity_id}\nidentity: {identity.identity_title} — {', '.join(identity.identity_artists)}\nidentity_version_cue: {identity.identity_version_cue or '-'}\nidentity_duration_ms: {identity.identity_duration_ms}\nidentity_isrc: {identity.identity_isrc}\ncanonical_id: {block.canonical_track_id}\ncomparison_count: {len(block.comparisons)}\ncomparison_consistent: {str(block.comparison_consistent).lower()}\ncomparison_inconsistent: {str(not block.comparison_consistent).lower()}\nmin_duration_delta_ms: {block.min_duration_delta_ms}\nmax_duration_delta_ms: {block.max_duration_delta_ms}\nduration_band_mixed: {str(block.duration_band_mixed).lower()}")
+                    for index, item in enumerate(block.comparisons, 1): _safe_echo(f"comparison_{index}_identity_id: {item.comparison_identity_id}\ncomparison_{index}: {item.comparison_title} — {', '.join(item.comparison_artists)}\ncomparison_{index}_version_cue: {item.comparison_version_cue or '-'}\ncomparison_{index}_duration_ms: {item.comparison_duration_ms}\ncomparison_{index}_isrc: {item.comparison_isrc}\ncomparison_{index}_duration_delta_ms: {item.duration_delta_ms}\ncomparison_{index}_same_isrc: {str(item.identity_isrc == item.comparison_isrc).lower()}\ncomparison_{index}_duration_band: {item.category}")
+                return
+            rows = service.anomalies(category, limit)
         for item in rows:
             _safe_echo(
                 f"candidate_id: {item.candidate_id}\nidentity_id: {item.identity_id}\n"
