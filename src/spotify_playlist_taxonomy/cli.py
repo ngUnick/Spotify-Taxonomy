@@ -71,6 +71,10 @@ from spotify_playlist_taxonomy.workflows.phase3 import Phase3Coordinator
 from spotify_playlist_taxonomy.workflows.review import Phase3ReviewService
 from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceService
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
+from spotify_playlist_taxonomy.workflows.match_evidence_review import (
+    ANOMALY_CATEGORIES,
+    MatchEvidenceReviewService,
+)
 from spotify_playlist_taxonomy.workflows.research import (
     EvidenceSufficiencyService,
     ResearchCoordinator,
@@ -1011,6 +1015,39 @@ def catalogue_match_evidence_status(
         typer.echo("duration_thresholds_cumulative: true")
         for name, value in report.metrics:
             typer.echo(f"{name}: {value}")
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_match_app.command("evidence-list")
+def catalogue_match_evidence_list(
+    category: str = typer.Option(..., "--category", help="One of: " + ", ".join(ANOMALY_CATEGORIES)),
+    limit: int = typer.Option(25, "--limit", min=1, max=100),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show bounded local evidence anomalies; never contacts Spotify or changes match state."""
+    try:
+        with _phase3_store(config_path, data_dir) as (_, _, store):
+            if current_schema_version(store.connection) < 15:
+                raise PersistenceError("database requires migration 15; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            rows = MatchEvidenceReviewService(store, binding.binding_id).anomalies(category, limit)
+        for item in rows:
+            _safe_echo(
+                f"candidate_id: {item.candidate_id}\nidentity_id: {item.identity_id}\n"
+                f"identity: {item.identity_title} — {', '.join(item.identity_artists)}\n"
+                f"identity_version_cue: {item.identity_version_cue or '-'}\n"
+                f"identity_duration_ms: {item.identity_duration_ms}\nidentity_isrc: {item.identity_isrc}\n"
+                f"canonical_id: {item.canonical_track_id}\ncomparison_identity_id: {item.comparison_identity_id}\n"
+                f"comparison: {item.comparison_title} — {', '.join(item.comparison_artists)}\n"
+                f"comparison_version_cue: {item.comparison_version_cue or '-'}\n"
+                f"comparison_duration_ms: {item.comparison_duration_ms}\ncomparison_isrc: {item.comparison_isrc}\n"
+                f"duration_delta_ms: {item.duration_delta_ms}\ncategory: {item.category}\n"
+                f"paired_create_new_candidate_id: {item.paired_create_new_candidate_id or '-'}\n"
+            )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
         _fail(error)
 

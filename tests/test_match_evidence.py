@@ -17,6 +17,7 @@ from spotify_playlist_taxonomy.persistence.database import load_migrations
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceService
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
+from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -91,6 +92,60 @@ class MatchEvidenceTests(unittest.TestCase):
         self.assertEqual(1, report["different_isrc"])
         self.assertEqual(1, report["version_explicit_conflict"])
         self.assertEqual(0, report["same_isrc_version_conflict"])
+
+    def test_version_reporting_reuses_title_cues_and_distinguishes_neither_and_conflict(self) -> None:
+        self.connection.execute("UPDATE track_identities SET version_label=NULL, title='Synthetic'")
+        self.connection.commit()
+        report = dict(MatchEvidenceService(self.store, self.binding.binding_id).report().metrics)
+        self.assertEqual(2, report["version_neither_explicit_cue"])
+        self.assertEqual(0, report["version_uncertain_or_unavailable"])
+        self.connection.execute("UPDATE track_identities SET title='Synthetic Live' WHERE identity_id='identity.unresolved'")
+        self.connection.execute("UPDATE track_identities SET title='Synthetic Live' WHERE identity_id='identity.linked.a'")
+        self.connection.execute("UPDATE track_identities SET title='Synthetic Acoustic' WHERE identity_id='identity.linked.b'")
+        self.connection.commit()
+        report = dict(MatchEvidenceService(self.store, self.binding.binding_id).report().metrics)
+        self.assertEqual(1, report["version_same_or_compatible"])
+        self.assertEqual(1, report["version_explicit_conflict"])
+
+    def test_anomaly_categories_are_read_only_deterministic_and_preserve_multiple_comparisons(self) -> None:
+        self.connection.execute("""INSERT INTO canonical_match_candidates(
+            candidate_id, account_binding_id, identity_id, canonical_track_id, action, state,
+            confidence, basis_json, matcher_version, input_fingerprint, candidate_key, created_at
+        ) VALUES ('candidate.create', ?, 'identity.unresolved', NULL, 'create_new', 'ambiguous', .0, '[]', 'synthetic', 'f', 'new', 'now')""", (self.binding.binding_id,))
+        self.connection.commit()
+        service = MatchEvidenceReviewService(self.store, self.binding.binding_id)
+        before = self.connection.total_changes
+        for category, identity_id, duration, isrc in (
+            ("same-isrc-exact-duration", "identity.linked.a", 100000, "USRC17607839"),
+            ("same-isrc-duration-gt-2s", "identity.linked.a", 103000, "USRC17607839"),
+            ("same-isrc-duration-gt-5s", "identity.linked.a", 106000, "USRC17607839"),
+            ("different-isrc-duration-le-1s", "identity.linked.b", 100500, "GBAYE6800011"),
+            ("different-isrc-exact-duration", "identity.linked.b", 100000, "GBAYE6800011"),
+        ):
+            with self.subTest(category=category):
+                self.connection.execute("UPDATE track_identities SET duration_ms=?, isrc=? WHERE identity_id=?", (duration, isrc, identity_id))
+                self.connection.commit()
+                rows = service.anomalies(category, 1)
+                self.assertEqual(1, len(rows))
+                self.assertEqual(category, rows[0].category)
+                self.assertEqual("candidate.create", rows[0].paired_create_new_candidate_id)
+        self.assertEqual(before + 5, self.connection.total_changes)
+        self.connection.execute("UPDATE track_identities SET duration_ms=100000, isrc='USRC17607839' WHERE identity_id IN ('identity.linked.a', 'identity.linked.b')")
+        self.connection.commit()
+        rows = service.anomalies("same-isrc-exact-duration", 100)
+        self.assertEqual(2, len(rows))
+        self.assertEqual(tuple(sorted(item.comparison_identity_id for item in rows)), tuple(item.comparison_identity_id for item in rows))
+
+    def test_evidence_list_cli_is_bounded_and_local_only(self) -> None:
+        database = Path(self.temp.name) / "app.db"
+        data_dir = Path(self.temp.name) / "review-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        runner = CliRunner()
+        result = runner.invoke(app, ["catalogue", "match", "evidence-list", "--category", "same-isrc-exact-duration", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)])
+        self.assertEqual(0, result.exit_code, result.output)
+        self.assertIn("candidate_id: candidate.synthetic", result.output)
+        self.assertIn("category: same-isrc-exact-duration", result.output)
+        self.assertEqual(1, sum(line.startswith("candidate_id:") for line in result.output.splitlines()))
 
     def test_identity_validation_normalizes_isrc_and_rejects_negative_duration(self) -> None:
         identity = PlatformTrackIdentity("identity.normalized", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), duration_ms=0, isrc="us-rc1-76-07839")

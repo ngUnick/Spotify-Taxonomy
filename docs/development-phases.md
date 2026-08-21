@@ -157,6 +157,15 @@ aggregates only, never scans sources, makes no matching decision, and uses a sin
 deprecated multi-track lookup. A stored duration marks a completed request, so an optional absent ISRC is not
 retried indefinitely. Run `db init` first when upgrading an existing runtime database so its explicit migration
 mechanism applies schema 15.
+`catalogue match evidence-list --category CATEGORY --limit 1..100` is a local, read-only operator review
+surface. It emits one deterministic row per linked comparison identity (so multiple comparisons are never
+collapsed) for `same-isrc-duration-gt-5s`, `same-isrc-duration-gt-2s`,
+`different-isrc-duration-le-1s`, `different-isrc-exact-duration`, or `same-isrc-exact-duration`. It makes
+no provider call or local state change.
+Spotify track ingestion does not manufacture `version_label`; evidence status therefore falls back to the
+existing deterministic title-marker helper (`live`, `acoustic`, `remix`, `remaster`, `edit`, `explicit`,
+`clean`, and `instrumental`) for reporting only. It distinguishes compatible explicit cues, conflicts,
+neither-side cues, and one-sided/uncertain cues without changing candidate-generation protection.
 The deferred real Phase 11 addition remains deferred until a genuine desired membership exists.
 
 ## Future, separately approved

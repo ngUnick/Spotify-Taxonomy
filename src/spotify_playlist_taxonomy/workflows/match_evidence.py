@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from spotify_playlist_taxonomy.persistence.phase3 import (
     Phase3Store,
+    _version_from_title,
     _versions_conflict,
 )
 
@@ -27,7 +28,7 @@ class MatchEvidenceService:
         rows = self.store.connection.execute(
             """
             SELECT candidate.canonical_track_id, identity.duration_ms, identity.isrc,
-                   identity.version_label
+                   identity.version_label, identity.title
             FROM canonical_match_candidates AS candidate
             JOIN track_identities AS identity ON identity.identity_id = candidate.identity_id
             WHERE candidate.account_binding_id = ? AND candidate.action = 'link_existing'
@@ -44,7 +45,7 @@ class MatchEvidenceService:
                 counts["unresolved_isrc_missing"] += 1
             comparisons = tuple(self.store.connection.execute(
                 """
-                SELECT identity.duration_ms, identity.isrc, identity.version_label
+                SELECT identity.duration_ms, identity.isrc, identity.version_label, identity.title
                 FROM account_canonical_identity_links AS link
                 JOIN track_identities AS identity ON identity.identity_id = link.identity_id
                 WHERE link.account_binding_id = ? AND link.canonical_track_id = ?
@@ -78,7 +79,8 @@ class MatchEvidenceService:
             "same_isrc_duration_le_500ms", "same_isrc_duration_le_1s",
             "same_isrc_duration_le_2s", "same_isrc_duration_gt_2s",
             "version_no_explicit_conflict", "version_same_or_compatible",
-            "version_explicit_conflict", "version_uncertain_or_unavailable",
+            "version_explicit_conflict", "version_neither_explicit_cue",
+            "version_uncertain_or_unavailable",
             "same_isrc_duration_le_1s_no_version_conflict",
             "duration_le_1s_no_version_conflict_isrc_missing",
             "duration_le_1s_different_isrc", "same_isrc_version_conflict",
@@ -99,12 +101,14 @@ class MatchEvidenceService:
             counts["comparison_pairs_with_isrc"] += 1
             same_isrc = unresolved["isrc"] == comparison["isrc"]  # type: ignore[index]
             counts["same_isrc" if same_isrc else "different_isrc"] += 1
-        conflict = _versions_conflict(
-            unresolved["version_label"], comparison["version_label"]  # type: ignore[index]
-        )
+        unresolved_cue = version_cue(unresolved["version_label"], unresolved["title"])  # type: ignore[index]
+        comparison_cue = version_cue(comparison["version_label"], comparison["title"])  # type: ignore[index]
+        conflict = _versions_conflict(unresolved_cue, comparison_cue)
         if conflict:
             counts["version_explicit_conflict"] += 1
-        elif unresolved["version_label"] is None or comparison["version_label"] is None:  # type: ignore[index]
+        elif unresolved_cue is None and comparison_cue is None:
+            counts["version_neither_explicit_cue"] += 1; counts["version_no_explicit_conflict"] += 1
+        elif unresolved_cue is None or comparison_cue is None:
             counts["version_uncertain_or_unavailable"] += 1; counts["version_no_explicit_conflict"] += 1
         else:
             counts["version_same_or_compatible"] += 1; counts["version_no_explicit_conflict"] += 1
@@ -142,3 +146,8 @@ class MatchEvidenceService:
             counts["duration_le_1s_different_isrc"] += 1
         if delta > 5000 and not conflict:
             counts["duration_gt_5s_no_version_conflict"] += 1
+
+
+def version_cue(version_label: str | None, title: str) -> str | None:
+    """Use persisted label when available, otherwise existing title-marker semantics."""
+    return version_label or _version_from_title(title)
