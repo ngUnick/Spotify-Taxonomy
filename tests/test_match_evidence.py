@@ -25,7 +25,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceServ
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
-from spotify_playlist_taxonomy.workflows.external_recording_targets import EXTERNAL_RECORDING_CANDIDATE_STRATUM, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonMember, ExternalRecordingComparisonService, ExternalRecordingDetailFetchService, ExternalRecordingDetailTargetProjectionService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService, _external_recording_relationship
+from spotify_playlist_taxonomy.workflows.external_recording_targets import EXTERNAL_RECORDING_CANDIDATE_STRATUM, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonMember, ExternalRecordingComparisonService, ExternalRecordingDetailFetchService, ExternalRecordingDetailTarget, ExternalRecordingDetailTargetProjectionService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService, _external_recording_relationship, select_external_recording_detail_targets
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -460,6 +460,10 @@ class MatchEvidenceTests(unittest.TestCase):
         before = self.connection.total_changes
         preview = ExternalRecordingDetailTargetProjectionService(self.store, self.binding.binding_id).preview()
         self.assertEqual((1, 1, 1, 0, 1, "fresh_not_found", "no_evidence", True), (preview.eligible_candidate_references, preview.unique_recording_targets, preview.fresh_not_found_counterpart_targets, preview.fresh_ambiguous_counterpart_targets, preview.requires_lookup_targets, preview.targets[0].counterpart_state, preview.targets[0].detail_evidence_state, preview.targets[0].requires_lookup))
+        self.assertEqual(
+            ExternalRecordingDetailTargetProjectionService(self.store, self.binding.binding_id).selected(1),
+            ExternalRecordingDetailFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1).plan(1),
+        )
         self.assertEqual(before, self.connection.total_changes)
         database = Path(self.temp.name) / "app.db"; data_dir = Path(self.temp.name) / "detail-preview-runtime"; (data_dir / "state").mkdir(parents=True)
         self.connection.close(); database.replace(data_dir / "state" / "app.db")
@@ -470,6 +474,25 @@ class MatchEvidenceTests(unittest.TestCase):
             self.assertIn(field, first.output)
         self.assertNotEqual(0, CliRunner().invoke(app, [*args[:6], "--limit", "0", *args[8:]]).exit_code)
         self.assertNotEqual(0, CliRunner().invoke(app, [*args[:6], "--limit", "21", *args[8:]]).exit_code)
+
+    def test_external_recording_detail_selection_filters_fetchable_targets_before_limit(self) -> None:
+        def target(recording_id: str, counterpart: str, state: str, required: bool) -> ExternalRecordingDetailTarget:
+            return ExternalRecordingDetailTarget(recording_id, counterpart, 1, state, required)
+        universe = (
+            target("00000000-0000-0000-0000-000000000001", "fresh_not_found", "fresh_resolved", False),
+            target("00000000-0000-0000-0000-000000000002", "fresh_not_found", "fresh_resolved", False),
+            target("00000000-0000-0000-0000-000000000003", "fresh_not_found", "fresh_resolved", False),
+            target("00000000-0000-0000-0000-000000000004", "fresh_not_found", "fresh_not_found", False),
+            target("00000000-0000-0000-0000-000000000005", "fresh_ambiguous", "fresh_lookup_failed", False),
+            target("00000000-0000-0000-0000-000000000006", "fresh_not_found", "stale", True),
+            target("00000000-0000-0000-0000-000000000007", "fresh_ambiguous", "no_evidence", True),
+            target("00000000-0000-0000-0000-000000000008", "fresh_ambiguous", "stale", True),
+        )
+        selected = select_external_recording_detail_targets(universe, 5)
+        self.assertEqual(tuple(item.external_recording_id for item in universe[5:]), tuple(item.external_recording_id for item in selected))
+        self.assertTrue(all(item.requires_lookup for item in selected))
+        self.assertEqual(2, len(select_external_recording_detail_targets(universe, 2)))
+        self.assertEqual(3, len(selected))
 
     def test_external_recording_detail_fetch_persists_and_renders_descriptive_context(self) -> None:
         self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")

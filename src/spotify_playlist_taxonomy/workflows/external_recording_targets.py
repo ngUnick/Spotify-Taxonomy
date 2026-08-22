@@ -270,6 +270,15 @@ class ExternalRecordingDetailPreview:
     targets: tuple[ExternalRecordingDetailTarget, ...]
 
 
+def select_external_recording_detail_targets(
+    targets: tuple[ExternalRecordingDetailTarget, ...], limit: int,
+) -> tuple[ExternalRecordingDetailTarget, ...]:
+    """Select the bounded provider-request subset of an ordered detail universe."""
+    if not 1 <= limit <= 20:
+        raise ValueError("limit must be between 1 and 20")
+    return tuple(item for item in targets if item.requires_lookup)[:limit]
+
+
 class ExternalRecordingDetailTargetProjectionService:
     """Local projection of distinct Recording-detail targets; no provider surface."""
 
@@ -318,9 +327,7 @@ class ExternalRecordingDetailTargetProjectionService:
         )
 
     def selected(self, limit: int) -> tuple[ExternalRecordingDetailTarget, ...]:
-        if not 1 <= limit <= 20:
-            raise ValueError("limit must be between 1 and 20")
-        return self.preview().targets[:limit]
+        return select_external_recording_detail_targets(self.preview().targets, limit)
 
     def _target(self, recording_id: str, counterpart_states: list[str], detail: ExternalEntityDetailEvidence | None) -> ExternalRecordingDetailTarget:
         detail_state = _detail_evidence_state(detail, self._now())
@@ -363,9 +370,7 @@ class ExternalRecordingDetailFetchService:
         self._now = now or (lambda: datetime.now(UTC))
 
     def plan(self, limit: int) -> tuple[ExternalRecordingDetailTarget, ...]:
-        if not 1 <= limit <= 20:
-            raise ValueError("limit must be between 1 and 20")
-        return tuple(item for item in ExternalRecordingDetailTargetProjectionService(self._store, self._binding_id, self._now).preview().targets if item.requires_lookup)[:limit]
+        return ExternalRecordingDetailTargetProjectionService(self._store, self._binding_id, self._now).selected(limit)
 
     def fetch(self, selected: tuple[ExternalRecordingDetailTarget, ...], lookup: object) -> ExternalRecordingDetailFetchReport:
         counts: Counter[str] = Counter(planned=len(selected))
