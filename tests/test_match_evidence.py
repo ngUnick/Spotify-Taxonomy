@@ -22,7 +22,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceServ
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
-from spotify_playlist_taxonomy.workflows.external_recording_targets import EXTERNAL_RECORDING_CANDIDATE_STRATUM, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService
+from spotify_playlist_taxonomy.workflows.external_recording_targets import EXTERNAL_RECORDING_CANDIDATE_STRATUM, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonMember, ExternalRecordingComparisonService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService, _external_recording_relationship
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -506,6 +506,42 @@ class MatchEvidenceTests(unittest.TestCase):
         missing = ExternalRecordingComparisonService(self.store, self.binding.binding_id).compare("partial-resolution", 1)[0]
         self.assertEqual("missing", missing.comparisons[1].isrc_relationship)
         self.assertEqual(before, self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall())
+
+    def test_external_recording_relationship_requires_two_usable_fresh_resolutions(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'"); self.connection.commit()
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        recording_a = "abcdefab-cdef-cdef-cdef-abcdefabcdef"; recording_b = "11111111-2222-3333-4444-555555555555"
+        def set_state(identity_id: str, state: str, recording_id: str | None = None) -> None:
+            if state == "no_evidence":
+                self.connection.execute("DELETE FROM identity_external_entity_evidence WHERE identity_id=?", (identity_id,)); self.connection.commit(); return
+            lookup_state = "not_found" if state == "stale" else state.removeprefix("fresh_")
+            extra = {"fresh_until": "2000-01-01T00:00:00Z"} if state == "stale" else {}
+            if lookup_state == "ambiguous": extra |= {"ambiguity_count": 2, "ambiguity_digest": "synthetic"}
+            evidence.upsert(IdentityExternalEntityEvidence("external.relationship." + identity_id, identity_id, external_id=recording_id, lookup_state=lookup_state, **(base | extra)))
+        def current() -> tuple[str, str]:
+            item = ExternalRecordingComparisonService(self.store, self.binding.binding_id).status().comparisons[0]
+            return item.primary_outcome, item.comparisons[0].external_recording_relationship or ""
+        set_state("identity.unresolved", "fresh_resolved", recording_a); set_state("identity.linked.a", "fresh_resolved", recording_a)
+        self.assertEqual(("all-resolved-same-recording", "same"), current())
+        set_state("identity.linked.a", "fresh_resolved", recording_b)
+        self.assertEqual(("all-resolved-disagree", "different"), current())
+        for candidate_state, candidate_id, comparison_state, comparison_id in (
+            ("fresh_resolved", recording_a, "fresh_not_found", None),
+            ("fresh_not_found", None, "fresh_resolved", recording_a),
+            ("fresh_not_found", None, "no_evidence", None),
+            ("no_evidence", None, "fresh_not_found", None),
+            ("fresh_ambiguous", None, "no_evidence", None),
+            ("fresh_lookup_failed", None, "fresh_lookup_failed", None),
+            ("stale", None, "stale", None),
+        ):
+            with self.subTest(candidate_state=candidate_state, comparison_state=comparison_state):
+                set_state("identity.unresolved", candidate_state, candidate_id); set_state("identity.linked.a", comparison_state, comparison_id)
+                self.assertEqual("unavailable", current()[1])
+        impossible = ExternalRecordingComparisonMember("identity.impossible", "Synthetic", (), None, None, None, "fresh_resolved", None)
+        resolved = ExternalRecordingComparisonMember("identity.resolved", "Synthetic", (), None, None, None, "fresh_resolved", recording_a)
+        self.assertEqual("unavailable", _external_recording_relationship(impossible, resolved))
+        self.assertEqual("unavailable", _external_recording_relationship(impossible, impossible))
 
     def test_external_recording_status_and_compare_cli_are_local_and_bounded(self) -> None:
         database = Path(self.temp.name) / "app.db"; data_dir = Path(self.temp.name) / "external-status-runtime"; (data_dir / "state").mkdir(parents=True)

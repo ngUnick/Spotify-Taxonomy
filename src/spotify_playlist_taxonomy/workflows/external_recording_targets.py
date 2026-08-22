@@ -13,6 +13,7 @@ from typing import Callable, Protocol
 from spotify_playlist_taxonomy.persistence.identity_external_evidence import (
     IdentityExternalEntityEvidence,
     IdentityExternalEvidenceStore,
+    normalize_external_entity_id,
 )
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store, _effective_version_cue, _versions_conflict
 from spotify_playlist_taxonomy.workflows.deterministic_match import ComparisonConsistency, evaluate_comparison_consistency
@@ -240,6 +241,23 @@ EXTERNAL_RECORDING_COMPARISON_CATEGORIES = (
 EXTERNAL_RECORDING_CANDIDATE_STRATUM = "different-isrc-duration-le-500ms-no-version-conflict-single-comparison"
 
 
+def _fresh_resolved_recording_id(evidence_state: str, external_recording_id: str | None) -> str | None:
+    if evidence_state != "fresh_resolved" or external_recording_id is None:
+        return None
+    try:
+        return normalize_external_entity_id("musicbrainz", "recording", external_recording_id)
+    except ValueError:
+        return None
+
+
+def _external_recording_relationship(candidate: "ExternalRecordingComparisonMember", comparison: "ExternalRecordingComparisonMember") -> str:
+    candidate_id = _fresh_resolved_recording_id(candidate.evidence_state, candidate.external_recording_id)
+    comparison_id = _fresh_resolved_recording_id(comparison.evidence_state, comparison.external_recording_id)
+    if candidate_id is None or comparison_id is None:
+        return "unavailable"
+    return "same" if candidate_id == comparison_id else "different"
+
+
 @dataclass(frozen=True, slots=True)
 class ExternalRecordingComparisonMember:
     identity_id: str
@@ -282,11 +300,11 @@ class ExternalRecordingCandidateComparison:
 
     @property
     def resolved_identity_count(self) -> int:
-        return sum(item.evidence_state == "fresh_resolved" for item in self.members)
+        return sum(_fresh_resolved_recording_id(item.evidence_state, item.external_recording_id) is not None for item in self.members)
 
     @property
     def distinct_resolved_recording_count(self) -> int:
-        return len({item.external_recording_id for item in self.members if item.external_recording_id is not None})
+        return len({recording_id for item in self.members if (recording_id := _fresh_resolved_recording_id(item.evidence_state, item.external_recording_id)) is not None})
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,7 +361,7 @@ class ExternalRecordingComparisonService:
             )
             for item in comparisons
         ))
-        resolved = tuple(item.external_recording_id for item in members if item.evidence_state == "fresh_resolved")
+        resolved = tuple(recording_id for item in members if (recording_id := _fresh_resolved_recording_id(item.evidence_state, item.external_recording_id)) is not None)
         if len(resolved) == len(members) and len(set(resolved)) == 1:
             outcome = "all-resolved-same-recording"
         elif len(resolved) == len(members):
@@ -386,11 +404,7 @@ class ExternalRecordingComparisonService:
         isrc_relationship = "missing" if candidate.isrc is None or comparison.isrc is None else "same" if candidate.isrc == comparison.isrc else "different"
         version_relationship = "unknown" if candidate.effective_version_cue is None or comparison.effective_version_cue is None else "conflict" if _versions_conflict(candidate.effective_version_cue, comparison.effective_version_cue) else "compatible"
         pair = evaluate_comparison_consistency(((isrc_relationship == "same", duration_delta, version_relationship == "conflict"),))
-        external_relationship = (
-            "same" if candidate.external_recording_id == comparison.external_recording_id else "different"
-            if candidate.evidence_state == comparison.evidence_state == "fresh_resolved" and candidate.external_recording_id and comparison.external_recording_id
-            else "unavailable"
-        )
+        external_relationship = _external_recording_relationship(candidate, comparison)
         return replace(
             comparison,
             duration_delta_ms=duration_delta,
