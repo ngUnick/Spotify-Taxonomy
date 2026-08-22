@@ -112,6 +112,10 @@ def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
 
 
+def _has_usable_isrc(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}\d{7}", value) is not None
+
+
 @dataclass(frozen=True, slots=True)
 class ExternalRecordingFetchReport:
     planned: int
@@ -192,7 +196,7 @@ class ExternalRecordingEvidenceFetchService:
     def _fetch_target(self, identity_id: str, evidence_store: IdentityExternalEvidenceStore, lookup: RecordingLookup) -> str:
         row = self._store.connection.execute("SELECT isrc FROM track_identities WHERE identity_id = ?", (identity_id,)).fetchone()
         isrc = row[0] if row is not None else None
-        if not isinstance(isrc, str) or not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}\d{7}", isrc):
+        if not _has_usable_isrc(isrc):
             self._persist(evidence_store, identity_id, "insufficient_input", None, "local-input", self._fingerprint({"identity_id": identity_id, "reason": "missing_isrc"}), "local.v1", None, None)
             return "insufficient_input"
         try:
@@ -232,6 +236,8 @@ EXTERNAL_RECORDING_COMPARISON_CATEGORIES = (
     "all-resolved-same-recording", "all-resolved-disagree", "partial-resolution", "no-resolution",
     "has-ambiguous", "has-not-found", "has-insufficient-input", "has-lookup-failed", "has-stale", "has-no-evidence",
 )
+
+EXTERNAL_RECORDING_CANDIDATE_STRATUM = "different-isrc-duration-le-500ms-no-version-conflict-single-comparison"
 
 
 @dataclass(frozen=True, slots=True)
@@ -415,6 +421,12 @@ class ExternalRecordingCandidateFetchPlan:
     candidate_limit: int
     identity_limit: int
     exceeds_identity_limit: bool
+    stratum: str | None = None
+    stratum_matching_candidates: int = 0
+    stratum_completable_candidates: int = 0
+    stratum_blocked_candidates: int = 0
+    stratum_completed_candidates: int = 0
+    stratum_completable_required_lookup_identity_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +442,7 @@ class ExternalRecordingCandidateFetchReport:
     lookup_failed: int
     skipped_fresh: int
     skipped_candidate_not_completable: int
+    skipped_candidate_not_in_stratum: int = 0
 
 
 class ExternalRecordingCandidateFetchService:
@@ -440,15 +453,18 @@ class ExternalRecordingCandidateFetchService:
         self._positive_ttl_hours, self._negative_ttl_hours = positive_ttl_hours, negative_ttl_hours
         self._ambiguous_ttl_hours, self._now = ambiguous_ttl_hours, now or (lambda: datetime.now(UTC))
 
-    def plan(self, candidate_limit: int, identity_limit: int) -> ExternalRecordingCandidateFetchPlan:
+    def plan(self, candidate_limit: int, identity_limit: int, *, stratum: str | None = None) -> ExternalRecordingCandidateFetchPlan:
         if not 1 <= candidate_limit <= 20:
             raise ValueError("candidate_limit must be between 1 and 20")
         if not 1 <= identity_limit <= 100:
             raise ValueError("identity_limit must be between 1 and 100")
+        if stratum not in (None, EXTERNAL_RECORDING_CANDIDATE_STRATUM):
+            raise ValueError("unknown external recording candidate stratum")
         status = ExternalRecordingComparisonService(self._store, self._binding_id, self._now).status()
         targets = {item.identity_id: item for item in status.target_preview.targets}
-        partial_source = tuple(item for item in status.comparisons if item.primary_outcome == "partial-resolution")
-        no_resolution_source = tuple(item for item in status.comparisons if item.primary_outcome == "no-resolution")
+        source = status.comparisons if stratum is None else tuple(item for item in status.comparisons if self._matches_stratum(item, stratum))
+        partial_source = tuple(item for item in source if item.primary_outcome == "partial-resolution")
+        no_resolution_source = tuple(item for item in source if item.primary_outcome == "no-resolution")
         partial = tuple(self._bundle(item, targets) for item in partial_source)
         no_resolution = tuple(self._bundle(item, targets) for item in no_resolution_source)
         partial = tuple(item for item in partial if item is not None)
@@ -457,10 +473,36 @@ class ExternalRecordingCandidateFetchService:
         lookup_ids = tuple(sorted({identity_id for item in selected for identity_id in item.lookup_identity_ids}))
         selected_ids = {identity_id for item in selected for identity_id in item.member_identity_ids}
         resolved = sum(targets[identity_id].evidence_state == "fresh_resolved" for identity_id in selected_ids)
+        completed = tuple(
+            item for item in source
+            if (bundle := self._bundle(item, targets, allow_complete=True)) is not None and not bundle.lookup_identity_ids
+        )
+        completable = partial + no_resolution
+        completable_lookup_ids = tuple(sorted({identity_id for item in completable for identity_id in item.lookup_identity_ids}))
+        blocked = len(source) - len(completable) - len(completed)
         return ExternalRecordingCandidateFetchPlan(
             len(partial), len(no_resolution), len(partial_source) + len(no_resolution_source) - len(partial) - len(no_resolution),
             selected, len(selected_ids), resolved, lookup_ids, candidate_limit, identity_limit,
             len(lookup_ids) > identity_limit,
+            stratum, len(source), len(completable), blocked, len(completed), completable_lookup_ids,
+        )
+
+    @staticmethod
+    def _matches_stratum(item: ExternalRecordingCandidateComparison, stratum: str) -> bool:
+        if stratum != EXTERNAL_RECORDING_CANDIDATE_STRATUM:
+            return False
+        if len(item.comparisons) != 1:
+            return False
+        comparison = item.comparisons[0]
+        return (
+            _has_usable_isrc(item.candidate.isrc)
+            and _has_usable_isrc(comparison.isrc)
+            and item.candidate.isrc != comparison.isrc
+            and item.candidate.duration_ms is not None
+            and comparison.duration_ms is not None
+            and comparison.duration_delta_ms is not None
+            and comparison.duration_delta_ms <= 500
+            and comparison.version_relationship != "conflict"
         )
 
     @staticmethod
@@ -479,9 +521,12 @@ class ExternalRecordingCandidateFetchService:
         counts: Counter[str] = Counter(planned_candidates=len(plan.selected_bundles), planned_lookup_identities=len(plan.required_lookup_identity_ids))
         seen_lookup_ids: set[str] = set()
         for bundle in plan.selected_bundles:
-            refreshed = self.plan_for_candidate(bundle.candidate_id)
+            refreshed = self.plan_for_candidate(bundle.candidate_id, stratum=plan.stratum)
             if refreshed is None:
-                counts["skipped_candidate_not_completable"] += 1
+                if plan.stratum is not None and not self._candidate_matches_stratum(bundle.candidate_id, plan.stratum):
+                    counts["skipped_candidate_not_in_stratum"] += 1
+                else:
+                    counts["skipped_candidate_not_completable"] += 1
                 continue
             targets = ExternalRecordingTargetProjectionService(self._store, self._binding_id, self._now).preview().targets
             current_by_id = {item.identity_id: item for item in targets}
@@ -499,13 +544,19 @@ class ExternalRecordingCandidateFetchService:
                 counts["processed_lookup_identities" if name == "processed" else name] += getattr(report, name)
         return ExternalRecordingCandidateFetchReport(*(counts[name] for name in (
             "planned_candidates", "processed_candidates", "planned_lookup_identities", "processed_lookup_identities",
-            "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh", "skipped_candidate_not_completable",
+            "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh", "skipped_candidate_not_completable", "skipped_candidate_not_in_stratum",
         )))
 
-    def plan_for_candidate(self, candidate_id: str) -> ExternalRecordingCandidateFetchBundle | None:
+    def plan_for_candidate(self, candidate_id: str, *, stratum: str | None = None) -> ExternalRecordingCandidateFetchBundle | None:
         status = ExternalRecordingComparisonService(self._store, self._binding_id, self._now).status()
         targets = {item.identity_id: item for item in status.target_preview.targets}
         for item in status.comparisons:
             if item.candidate_id == candidate_id:
+                if stratum is not None and not self._matches_stratum(item, stratum):
+                    return None
                 return self._bundle(item, targets, allow_complete=True)
         return None
+
+    def _candidate_matches_stratum(self, candidate_id: str, stratum: str) -> bool:
+        status = ExternalRecordingComparisonService(self._store, self._binding_id, self._now).status()
+        return any(item.candidate_id == candidate_id and self._matches_stratum(item, stratum) for item in status.comparisons)

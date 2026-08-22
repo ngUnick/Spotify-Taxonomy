@@ -22,7 +22,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceServ
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
-from spotify_playlist_taxonomy.workflows.external_recording_targets import ExternalRecordingCandidateFetchService, ExternalRecordingComparisonService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService
+from spotify_playlist_taxonomy.workflows.external_recording_targets import EXTERNAL_RECORDING_CANDIDATE_STRATUM, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -530,6 +530,90 @@ class MatchEvidenceTests(unittest.TestCase):
         self.assertEqual(0, result.exit_code, result.output); self.assertEqual(before, after)
         for field in ("candidate_identity_id:", "candidate_title:", "candidate_artists:", "candidate_effective_version_cue:", "comparison_1_identity_id:", "comparison_1_duration_delta_ms:", "comparison_1_isrc_relationship:", "comparison_1_version_relationship:", "comparison_1_comparison_consistency:", "comparison_1_external_recording_relationship:"):
             self.assertIn(field, result.output)
+
+    def test_external_recording_candidate_stratum_matches_exact_local_boundaries(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100000, version_label=NULL, title='Synthetic' WHERE identity_id='identity.linked.a'")
+        self.connection.execute("UPDATE track_identities SET title='Synthetic' WHERE identity_id='identity.unresolved'")
+        self.connection.commit()
+        service = ExternalRecordingCandidateFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        plan = service.plan(1, 2, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM)
+        self.assertEqual((1, 1, 0, 0, 1, 2, 2), (plan.stratum_matching_candidates, plan.stratum_completable_candidates, plan.stratum_blocked_candidates, plan.stratum_completed_candidates, len(plan.selected_bundles), len(plan.required_lookup_identity_ids), len(plan.selected_bundles[0].member_identity_ids)))
+        for updates in (
+            "duration_ms=100500",
+            "duration_ms=100501",
+            "isrc='USRC17607839', duration_ms=100000",
+            "isrc=NULL, duration_ms=100000",
+            "isrc='GBAYE6800011', duration_ms=NULL",
+            "duration_ms=100000, version_label='studio'",
+        ):
+            self.connection.execute(f"UPDATE track_identities SET {updates} WHERE identity_id='identity.linked.a'"); self.connection.commit()
+            expected = 0 if updates in {"duration_ms=100501", "isrc='USRC17607839', duration_ms=100000", "isrc=NULL, duration_ms=100000", "isrc='GBAYE6800011', duration_ms=NULL", "duration_ms=100000, version_label='studio'"} else 1
+            self.assertEqual(expected, service.plan(1, 2, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM).stratum_matching_candidates, updates)
+        self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100000, version_label=NULL WHERE identity_id='identity.linked.a'")
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.a'"); self.connection.commit()
+        self.assertEqual(0, service.plan(1, 2, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM).stratum_matching_candidates)
+        self.connection.execute("INSERT INTO account_canonical_identity_links VALUES ('link.restored.a', ?, 'identity.linked.a', 'canonical.synthetic', 'now')", (self.binding.binding_id,))
+        self.connection.execute("INSERT INTO account_canonical_identity_links VALUES ('link.restored.b', ?, 'identity.linked.b', 'canonical.synthetic', 'now')", (self.binding.binding_id,)); self.connection.commit()
+        self.assertEqual(0, service.plan(1, 3, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM).stratum_matching_candidates)
+
+    def test_external_recording_candidate_stratum_retains_completion_rules_and_rechecks(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100000 WHERE identity_id='identity.linked.a'"); self.connection.commit()
+        service = ExternalRecordingCandidateFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        self.assertEqual((1, 0, 0), tuple(getattr(service.plan(1, 2, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM), name) for name in ("stratum_completable_candidates", "stratum_blocked_candidates", "stratum_completed_candidates")))
+        evidence.upsert(IdentityExternalEntityEvidence("external.resolved.candidate", "identity.unresolved", external_id="abcdefab-cdef-cdef-cdef-abcdefabcdef", lookup_state="resolved", **base))
+        partial = service.plan(1, 1, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM)
+        self.assertEqual((1, 1, 1), (partial.stratum_completable_candidates, len(partial.required_lookup_identity_ids), partial.already_resolved_members))
+        evidence.upsert(IdentityExternalEntityEvidence("external.resolved.comparison", "identity.linked.a", external_id="abcdefab-cdef-cdef-cdef-abcdefabcdef", lookup_state="resolved", **base))
+        completed = service.plan(1, 2, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM)
+        self.assertEqual((0, 0, 1, 0), (completed.stratum_completable_candidates, completed.stratum_blocked_candidates, completed.stratum_completed_candidates, len(completed.selected_bundles)))
+        for state in ("ambiguous", "not_found", "insufficient_input", "lookup_failed"):
+            with self.subTest(state=state):
+                evidence.upsert(IdentityExternalEntityEvidence("external.terminal." + state, "identity.linked.a", external_id=None, lookup_state=state, **(base | ({"ambiguity_count": 2, "ambiguity_digest": "synthetic"} if state == "ambiguous" else {}))))
+                blocked = service.plan(1, 2, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM)
+                self.assertEqual((0, 1, 0), (blocked.stratum_completable_candidates, blocked.stratum_blocked_candidates, blocked.stratum_completed_candidates))
+        evidence.upsert(IdentityExternalEntityEvidence("external.stale", "identity.linked.a", external_id=None, lookup_state="stale", **base))
+        self.assertEqual(1, service.plan(1, 1, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM).stratum_completable_candidates)
+        self.connection.execute("DELETE FROM identity_external_entity_evidence"); self.connection.commit()
+        plan = service.plan(1, 2, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM)
+        self.connection.execute("UPDATE track_identities SET isrc='USRC17607839' WHERE identity_id='identity.linked.a'"); self.connection.commit()
+        class NoNetwork:
+            calls = 0
+            def lookup_recordings_by_isrc(self, isrc: str): self.calls += 1; raise AssertionError("stratum departure must not call provider")
+        lookup = NoNetwork(); report = service.fetch(plan, lookup)
+        self.assertEqual((0, 1, 0), (report.processed_lookup_identities, report.skipped_candidate_not_in_stratum, report.skipped_candidate_not_completable)); self.assertEqual(0, lookup.calls)
+        self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011' WHERE identity_id='identity.linked.a'"); self.connection.commit()
+        terminal_plan = service.plan(1, 2, stratum=EXTERNAL_RECORDING_CANDIDATE_STRATUM)
+        evidence.upsert(IdentityExternalEntityEvidence("external.recheck.terminal", "identity.linked.a", external_id=None, lookup_state="not_found", **base))
+        terminal = service.fetch(terminal_plan, lookup)
+        self.assertEqual((0, 0, 1), (terminal.processed_lookup_identities, terminal.skipped_candidate_not_in_stratum, terminal.skipped_candidate_not_completable)); self.assertEqual(0, lookup.calls)
+        self.assertEqual(0, self.connection.execute("SELECT COUNT(*) FROM deterministic_match_decisions").fetchone()[0])
+
+    def test_external_recording_candidate_stratum_preview_cli_is_read_only_and_bounded(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100000 WHERE identity_id='identity.linked.a'"); self.connection.commit()
+        database = Path(self.temp.name) / "app.db"; data_dir = Path(self.temp.name) / "external-stratum-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        args = ["catalogue", "match", "external-recording", "fetch-candidates", "--candidate-limit", "1", "--identity-limit", "2", "--stratum", EXTERNAL_RECORDING_CANDIDATE_STRATUM, "--preview", "--config", str(CONFIG), "--data-dir", str(data_dir)]
+        before_connection = connect_database(data_dir / "state" / "app.db"); before = before_connection.execute("SELECT COUNT(*) FROM identity_external_entity_evidence").fetchone()[0]; before_connection.close()
+        preview = CliRunner().invoke(app, args)
+        after_connection = connect_database(data_dir / "state" / "app.db"); after = after_connection.execute("SELECT COUNT(*) FROM identity_external_entity_evidence").fetchone()[0]; after_connection.close()
+        self.assertEqual(0, preview.exit_code, preview.output); self.assertEqual(before, after)
+        for field in (f"stratum: {EXTERNAL_RECORDING_CANDIDATE_STRATUM}", "stratum_matching_candidates: 1", "stratum_completable_candidates: 1", "network_access: no", "required_lookup_identities: 2"):
+            self.assertIn(field, preview.output)
+        self.assertNotIn("Fetch MusicBrainz", preview.output)
+        self.assertNotEqual(0, CliRunner().invoke(app, [*args, "--yes"]).exit_code)
+        self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "fetch-candidates", "--candidate-limit", "1", "--identity-limit", "2", "--stratum", "unknown", "--preview", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
+        class FakeProvider:
+            def __init__(self, **_: object) -> None: pass
+            def lookup_recordings_by_isrc(self, isrc: str) -> MusicBrainzRecordingLookupResult:
+                return MusicBrainzRecordingLookupResult(isrc, ("abcdefab-cdef-cdef-cdef-abcdefabcdef",), "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z")
+        with patch("spotify_playlist_taxonomy.cli.MusicBrainzResearchProvider", FakeProvider):
+            accepted = CliRunner().invoke(app, [item for item in args if item != "--preview"] + ["--yes"])
+        self.assertEqual(0, accepted.exit_code, accepted.output); self.assertIn("matching_mutations: 0", accepted.output)
 
     def test_external_recording_candidate_fetch_plan_is_complete_prioritized_and_fail_closed(self) -> None:
         service = ExternalRecordingCandidateFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
