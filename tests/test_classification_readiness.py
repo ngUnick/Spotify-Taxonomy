@@ -17,6 +17,7 @@ from spotify_playlist_taxonomy.domain.models import (
     PlatformTrackIdentity, ResearchEvidence, ResearchSource,
 )
 from spotify_playlist_taxonomy.persistence import SQLiteStateStore, apply_migrations, connect_database, sync_taxonomy
+from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 from spotify_playlist_taxonomy.workflows.classification_readiness import (
     ClassificationReadinessService, ReadinessBucket,
 )
@@ -34,6 +35,10 @@ class ClassificationReadinessTests(unittest.TestCase):
         self.bundle = load_phase4_bundle(CONFIG)
         sync_taxonomy(self.connection, self.bundle.taxonomy)
         self.store = SQLiteStateStore(self.connection)
+        self.binding, self.source, self.scan = "binding.synthetic.readiness", "source.synthetic.readiness", "scan.synthetic.readiness"
+        self.connection.execute("INSERT INTO platform_account_bindings VALUES (?, 'spotify', 'account.synthetic.readiness', 'user.synthetic.readiness', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)", (self.binding,))
+        phase3 = Phase3Store(self.connection); phase3.register_liked_source(self.source, self.binding)
+        phase3.start_scan(scan_id=self.scan, source_id=self.source, binding_id=self.binding, starting_snapshot_id=None, starting_total=None, initial_page_signature=None, digest_version="synthetic.v1")
         self.service = ClassificationReadinessService(self.connection, self.bundle)
 
     def tearDown(self) -> None:
@@ -45,8 +50,17 @@ class ClassificationReadinessTests(unittest.TestCase):
         if mapping:
             identity_id = f"identity.synthetic.readiness.{suffix}"
             self.store.save_track_identity(PlatformTrackIdentity(identity_id, IdentityProvider.SPOTIFY, "Synthetic", ("Invented",), f"tracksynthetic{suffix.replace('_', '')}"))
-            self.store.save_identity_link(CanonicalTrackIdentityLink(f"link.synthetic.readiness.{suffix}", canonical_id, identity_id))
+            self.connection.execute("INSERT INTO account_track_identity_state VALUES (?, ?, ?, ?, NULL, NULL, 0, 0, '2026-01-01T00:00:00Z')", (self.binding, identity_id, self.scan, self.source))
+            self.connection.execute("INSERT INTO account_canonical_identity_links VALUES (?, ?, ?, ?, '2026-01-01T00:00:00Z')", (f"link.synthetic.readiness.{suffix}", self.binding, identity_id, canonical_id))
+            self.connection.commit()
         return canonical_id
+
+    def _account_link(self, canonical_id: str, suffix: str, provider: IdentityProvider = IdentityProvider.SPOTIFY) -> None:
+        identity_id = f"identity.synthetic.readiness.{suffix}"
+        self.store.save_track_identity(PlatformTrackIdentity(identity_id, provider, "Synthetic", ("Invented",), f"tracksynthetic{suffix}"))
+        self.connection.execute("INSERT INTO account_track_identity_state VALUES (?, ?, ?, ?, NULL, NULL, 0, 0, '2026-01-01T00:00:00Z')", (self.binding, identity_id, self.scan, self.source))
+        self.connection.execute("INSERT INTO account_canonical_identity_links VALUES (?, ?, ?, ?, '2026-01-01T00:00:00Z')", (f"link.synthetic.readiness.{suffix}", self.binding, identity_id, canonical_id))
+        self.connection.commit()
 
     def _evidence(self, canonical_id: str) -> None:
         self.store.save_evidence(ResearchEvidence(
@@ -130,7 +144,8 @@ class ClassificationReadinessTests(unittest.TestCase):
         duplicate = self._canonical("duplicate", mapping=True); self._proposal(duplicate, "vibe.chill"); self._proposal(duplicate, "vibe.chill", tag=".two")
         multiple = self._canonical("multiple", mapping=True)
         self.store.save_track_identity(PlatformTrackIdentity("identity.synthetic.readiness.multiple.two", IdentityProvider.SPOTIFY, "Synthetic", ("Invented",), "tracksyntheticmultipletwo"))
-        self.store.save_identity_link(CanonicalTrackIdentityLink("link.synthetic.readiness.multiple.two", multiple, "identity.synthetic.readiness.multiple.two"))
+        self.connection.execute("INSERT INTO account_track_identity_state VALUES (?, 'identity.synthetic.readiness.multiple.two', ?, ?, NULL, NULL, 0, 0, '2026-01-01T00:00:00Z')", (self.binding, self.scan, self.source))
+        self.connection.execute("INSERT INTO account_canonical_identity_links VALUES ('link.synthetic.readiness.multiple.two', ?, 'identity.synthetic.readiness.multiple.two', ?, '2026-01-01T00:00:00Z')", (self.binding, multiple)); self.connection.commit()
         report = self.service.report(25)
         distribution = dict(report.target_distribution)
         self.assertEqual(1, report.effective_exclude_canonicals)
@@ -140,6 +155,27 @@ class ClassificationReadinessTests(unittest.TestCase):
         self.assertEqual(1, report.population_mapping_blocked_canonicals)
         self.assertEqual("population", report.selected_action)
 
+    def test_mapping_diagnostics_are_exclusive_and_use_active_account_context(self) -> None:
+        self._canonical("zero")
+        legacy = self._canonical("legacy")
+        self.store.save_track_identity(PlatformTrackIdentity("identity.synthetic.readiness.legacy", IdentityProvider.SPOTIFY, "Synthetic", ("Invented",), "tracksyntheticlegacy"))
+        self.store.save_identity_link(CanonicalTrackIdentityLink("link.synthetic.readiness.legacy", legacy, "identity.synthetic.readiness.legacy"))
+        safe = self._canonical("safe", mapping=True)
+        multiple = self._canonical("multiple_reason", mapping=True); self._account_link(multiple, "multiple_reason_two")
+        mismatch = self._canonical("mismatch"); self._account_link(mismatch, "mismatch_musicbrainz", IdentityProvider.MUSICBRAINZ)
+        report = self.service.report(25)
+        self.assertEqual(1, report.spotify_mapping_exactly_one_safe_canonicals)
+        self.assertEqual(2, report.spotify_mapping_zero_current_canonicals)
+        self.assertEqual(1, report.spotify_mapping_multiple_current_canonicals)
+        self.assertEqual(1, report.spotify_mapping_provider_mismatch_canonicals)
+        self.assertEqual(0, report.spotify_mapping_account_context_unavailable_canonicals)
+        self.assertEqual(5, report.spotify_mapping_exactly_one_safe_canonicals + report.spotify_mapping_zero_current_canonicals + report.spotify_mapping_multiple_current_canonicals + report.spotify_mapping_provider_mismatch_canonicals + report.spotify_mapping_invalid_canonicals)
+        self.assertEqual(2, report.canonicals_with_current_spotify_link)
+        self.connection.execute("UPDATE platform_account_bindings SET active=0 WHERE binding_id=?", (self.binding,)); self.connection.commit()
+        offline = self.service.report(25)
+        self.assertEqual(5, offline.spotify_mapping_account_context_unavailable_canonicals)
+        self.assertEqual(0, offline.spotify_population_eligible_canonicals)
+
     def test_cli_is_read_only_offline_and_renders_selected_population_targets(self) -> None:
         data_dir = Path(self.temp.name) / "runtime"
         runner = CliRunner()
@@ -148,10 +184,15 @@ class ClassificationReadinessTests(unittest.TestCase):
         self.assertEqual(0, result.exit_code, result.output)
         connection = connect_database(data_dir / "state" / "app.db")
         store = SQLiteStateStore(connection)
+        binding, source, scan = "binding.synthetic.cli", "source.synthetic.cli", "scan.synthetic.cli"
+        connection.execute("INSERT INTO platform_account_bindings VALUES (?, 'spotify', 'account.synthetic.cli', 'user.synthetic.cli', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)", (binding,))
+        phase3 = Phase3Store(connection); phase3.register_liked_source(source, binding)
+        phase3.start_scan(scan_id=scan, source_id=source, binding_id=binding, starting_snapshot_id=None, starting_total=None, initial_page_signature=None, digest_version="synthetic.v1")
         canonical = "canonical.synthetic.cli.ready"
         store.save_canonical_track(CanonicalTrack(canonical, "Synthetic", ("Invented",)))
         store.save_track_identity(PlatformTrackIdentity("identity.synthetic.cli.ready", IdentityProvider.SPOTIFY, "Synthetic", ("Invented",), "tracksyntheticcli"))
-        store.save_identity_link(CanonicalTrackIdentityLink("link.synthetic.cli.ready", canonical, "identity.synthetic.cli.ready"))
+        connection.execute("INSERT INTO account_track_identity_state VALUES (?, 'identity.synthetic.cli.ready', ?, ?, NULL, NULL, 0, 0, '2026-01-01T00:00:00Z')", (binding, scan, source))
+        connection.execute("INSERT INTO account_canonical_identity_links VALUES ('link.synthetic.cli.ready', ?, 'identity.synthetic.cli.ready', ?, '2026-01-01T00:00:00Z')", (binding, canonical))
         spec = next(item for item in self.bundle.specifications if item.logical_playlist_id == "vibe.chill")
         connection.execute("INSERT INTO phase6_proposals VALUES ('proposal.synthetic.cli.ready', ?, 'vibe.chill', 'include', 'supported', .9, ?, ?, ?, 'synthetic.v1', 'input', ?, 'needs_review', '{}', '2026-01-01T00:00:00Z')", (canonical, spec.specification_version, self.bundle.taxonomy.taxonomy_version, self.bundle.vocabulary.vocabulary_version, self.bundle.digest)); connection.commit()
         before = tuple(connection.iterdump()); connection.close(); del connection; gc.collect()

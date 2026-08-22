@@ -13,6 +13,7 @@ from spotify_playlist_taxonomy.adapters.spotify.population import SpotifyManaged
 from spotify_playlist_taxonomy.config import load_phase4_bundle
 from spotify_playlist_taxonomy.domain.models import CanonicalTrack, CanonicalTrackIdentityLink, IdentityProvider, PlatformTrackIdentity
 from spotify_playlist_taxonomy.persistence import SQLiteStateStore, apply_migrations, connect_database, sync_taxonomy
+from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 from spotify_playlist_taxonomy.ports.music_platform import PlatformAccountIdentity, PlatformPlaylistSummary, TrackIdentityPage
 from spotify_playlist_taxonomy.workflows.phase11 import Phase11Service, PopulationError, PopulationRecoveryRequired
 
@@ -48,8 +49,13 @@ class Phase11PopulationTests(unittest.TestCase):
         self.connection.execute("INSERT INTO platform_account_bindings VALUES (?, 'spotify', 'account.synthetic', 'user.synthetic', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)", (self.binding,))
         self.connection.execute("INSERT INTO managed_target_registrations VALUES (?, 'registration.synthetic', 'spotify', ?, 'playlistsynthetic', 'active', 'phase10_create', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)", (self.target, self.binding))
         self.connection.commit()
+        source, scan = "source.synthetic.phase11", "scan.synthetic.phase11"
+        phase3 = Phase3Store(self.connection); phase3.register_liked_source(source, self.binding)
+        phase3.start_scan(scan_id=scan, source_id=source, binding_id=self.binding, starting_snapshot_id=None, starting_total=None, initial_page_signature=None, digest_version="synthetic.v1")
         store = SQLiteStateStore(self.connection); store.save_canonical_track(CanonicalTrack(self.canonical, "Synthetic", ("Artist",)))
-        store.save_track_identity(PlatformTrackIdentity("identity.synthetic", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), "tracksynthetic")); store.save_identity_link(CanonicalTrackIdentityLink("link.synthetic", self.canonical, "identity.synthetic"))
+        store.save_track_identity(PlatformTrackIdentity("identity.synthetic", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), "tracksynthetic"))
+        self.connection.execute("INSERT INTO account_track_identity_state VALUES (?, 'identity.synthetic', ?, ?, NULL, NULL, 0, 0, '2026-01-01T00:00:00Z')", (self.binding, scan, source))
+        self.connection.execute("INSERT INTO account_canonical_identity_links VALUES ('link.synthetic', ?, 'identity.synthetic', ?, '2026-01-01T00:00:00Z')", (self.binding, self.canonical)); self.connection.commit()
         spec = next(item for item in self.bundle.specifications if item.logical_playlist_id == "vibe.chill")
         self.connection.execute("INSERT INTO phase6_proposals VALUES ('proposal.synthetic', ?, 'vibe.chill', 'include', 'supported', .9, ?, ?, ?, 'synthetic.v1', 'input', ?, 'needs_review', '{}', '2026-01-01T00:00:00Z')", (self.canonical, spec.specification_version, self.bundle.taxonomy.taxonomy_version, self.bundle.vocabulary.vocabulary_version, self.bundle.digest)); self.connection.commit()
         self.service = Phase11Service(self.connection, self.bundle)

@@ -11,6 +11,7 @@ from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 from spotify_playlist_taxonomy.workflows.phase7 import EffectiveReview, Phase7Service
 from spotify_playlist_taxonomy.workflows.phase9 import DesiredState, Phase9Service
 from spotify_playlist_taxonomy.workflows.phase11 import (
+    current_account_canonical_identity_mappings,
     exact_spotify_population_mappings,
     is_exact_spotify_population_mapping,
 )
@@ -38,6 +39,14 @@ class ClassificationReadinessReport:
     canonical_tracks_total: int
     classification_eligible_canonicals: int
     spotify_population_eligible_canonicals: int
+    spotify_mapping_exactly_one_safe_canonicals: int
+    spotify_mapping_zero_current_canonicals: int
+    spotify_mapping_multiple_current_canonicals: int
+    spotify_mapping_account_context_unavailable_canonicals: int
+    spotify_mapping_provider_mismatch_canonicals: int
+    spotify_mapping_invalid_canonicals: int
+    canonicals_with_any_current_account_link: int
+    canonicals_with_current_spotify_link: int
     qualifying_research_evidence_canonicals: int
     current_derived_characteristics_canonicals: int
     current_classification_proposals_canonicals: int
@@ -93,11 +102,20 @@ class ClassificationReadinessService:
             effective_by_canonical.setdefault(value.canonical_track_id, []).append(value)
         desired_states = self.phase9.desired_many(canonical_ids)
         desired_by_canonical = {item.canonical_track_id: item for item in desired_states}
-        mappings = exact_spotify_population_mappings(self.connection)
+        active_binding = self.connection.execute(
+            "SELECT binding_id FROM platform_account_bindings WHERE active=1 ORDER BY bound_at"
+        ).fetchone()
+        current_mappings = {} if active_binding is None else current_account_canonical_identity_mappings(
+            self.connection, active_binding["binding_id"], canonical_ids,
+        )
+        mappings = {} if active_binding is None else exact_spotify_population_mappings(
+            self.connection, active_binding["binding_id"], canonical_ids,
+        )
         population_eligible = {
             canonical_id for canonical_id in canonical_ids
             if is_exact_spotify_population_mapping(mappings.get(canonical_id, ()))
         }
+        mapping_counts = self._mapping_counts(canonical_ids, current_mappings, mappings, active_binding is None)
         distribution = {target.output_target_id: 0 for target in self.bundle.output_targets.targets}
         for state in desired_states:
             for membership in state.memberships:
@@ -119,6 +137,14 @@ class ClassificationReadinessService:
             canonical_tracks_total=len(canonical_ids),
             classification_eligible_canonicals=len(canonical_ids),
             spotify_population_eligible_canonicals=len(population_eligible),
+            spotify_mapping_exactly_one_safe_canonicals=mapping_counts["safe"],
+            spotify_mapping_zero_current_canonicals=mapping_counts["zero"],
+            spotify_mapping_multiple_current_canonicals=mapping_counts["multiple"],
+            spotify_mapping_account_context_unavailable_canonicals=mapping_counts["context_unavailable"],
+            spotify_mapping_provider_mismatch_canonicals=mapping_counts["provider_mismatch"],
+            spotify_mapping_invalid_canonicals=mapping_counts["invalid"],
+            canonicals_with_any_current_account_link=mapping_counts["any_current"],
+            canonicals_with_current_spotify_link=mapping_counts["current_spotify"],
             qualifying_research_evidence_canonicals=len(qualifying),
             current_derived_characteristics_canonicals=len(current_characteristics),
             current_classification_proposals_canonicals=len(proposal_canonicals),
@@ -138,6 +164,38 @@ class ClassificationReadinessService:
             selections=selected,
             target_distribution=tuple(sorted(distribution.items())),
         )
+
+    @staticmethod
+    def _mapping_counts(
+        canonical_ids: tuple[str, ...],
+        current_mappings: dict[str, tuple[tuple[str, str, str | None], ...]],
+        spotify_mappings: dict[str, tuple[tuple[str, str | None], ...]],
+        context_unavailable: bool,
+    ) -> dict[str, int]:
+        """Return exclusive primary reasons matching the Phase 11 mapping contract."""
+
+        counts = {key: 0 for key in (
+            "safe", "zero", "multiple", "context_unavailable", "provider_mismatch", "invalid",
+            "any_current", "current_spotify",
+        )}
+        for canonical_id in canonical_ids:
+            current = current_mappings.get(canonical_id, ())
+            spotify = spotify_mappings.get(canonical_id, ())
+            counts["any_current"] += int(bool(current))
+            counts["current_spotify"] += int(bool(spotify))
+            if context_unavailable:
+                counts["context_unavailable"] += 1
+            elif not spotify and current:
+                counts["provider_mismatch"] += 1
+            elif not spotify:
+                counts["zero"] += 1
+            elif len(spotify) != 1:
+                counts["multiple"] += 1
+            elif is_exact_spotify_population_mapping(spotify):
+                counts["safe"] += 1
+            else:
+                counts["invalid"] += 1
+        return counts
 
     @staticmethod
     def _bucket(
