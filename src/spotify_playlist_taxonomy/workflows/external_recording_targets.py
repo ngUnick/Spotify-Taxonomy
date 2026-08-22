@@ -15,6 +15,10 @@ from spotify_playlist_taxonomy.persistence.identity_external_evidence import (
     IdentityExternalEvidenceStore,
     normalize_external_entity_id,
 )
+from spotify_playlist_taxonomy.persistence.external_entity_detail import (
+    ExternalEntityDetailEvidence,
+    ExternalEntityDetailStore,
+)
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store, _effective_version_cue, _versions_conflict
 from spotify_playlist_taxonomy.workflows.deterministic_match import ComparisonConsistency, evaluate_comparison_consistency
 from spotify_playlist_taxonomy.workflows.match_topology import UnresolvedMatchTopologyService
@@ -239,6 +243,99 @@ EXTERNAL_RECORDING_COMPARISON_CATEGORIES = (
 )
 
 EXTERNAL_RECORDING_CANDIDATE_STRATUM = "different-isrc-duration-le-500ms-no-version-conflict-single-comparison"
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingDetailTarget:
+    external_recording_id: str
+    counterpart_state: str
+    candidate_reference_count: int
+    detail_evidence_state: str
+    requires_lookup: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingDetailPreview:
+    eligible_candidate_references: int
+    unique_recording_targets: int
+    fresh_not_found_counterpart_targets: int
+    fresh_ambiguous_counterpart_targets: int
+    requires_lookup_targets: int
+    fresh_resolved_detail: int
+    fresh_not_found_detail: int
+    fresh_lookup_failed_detail: int
+    stale_detail: int
+    no_detail_evidence: int
+    targets: tuple[ExternalRecordingDetailTarget, ...]
+
+
+class ExternalRecordingDetailTargetProjectionService:
+    """Local projection of distinct Recording-detail targets; no provider surface."""
+
+    def __init__(self, store: Phase3Store, binding_id: str, now: Callable[[], datetime] | None = None) -> None:
+        self._store, self._binding_id = store, binding_id
+        self._now = now or (lambda: datetime.now(UTC))
+
+    def preview(self) -> ExternalRecordingDetailPreview:
+        comparison_status = ExternalRecordingComparisonService(self._store, self._binding_id, self._now).status()
+        references: dict[str, list[str]] = {}
+        for item in comparison_status.comparisons:
+            if not ExternalRecordingCandidateFetchService._matches_stratum(item, EXTERNAL_RECORDING_CANDIDATE_STRATUM):
+                continue
+            if len(item.comparisons) != 1:
+                continue
+            comparison = item.comparisons[0]
+            candidate_id = _fresh_resolved_recording_id(item.candidate.evidence_state, item.candidate.external_recording_id)
+            comparison_id = _fresh_resolved_recording_id(comparison.evidence_state, comparison.external_recording_id)
+            if (candidate_id is None) == (comparison_id is None):
+                continue
+            counterpart = comparison if candidate_id is not None else item.candidate
+            if counterpart.evidence_state not in {"fresh_not_found", "fresh_ambiguous"}:
+                continue
+            recording_id = candidate_id or comparison_id
+            assert recording_id is not None
+            references.setdefault(recording_id, []).append(counterpart.evidence_state)
+        details = {
+            item.external_id: item
+            for item in ExternalEntityDetailStore(self._store.connection).for_entities(
+                "musicbrainz", "recording", tuple(references)
+            )
+        }
+        targets = tuple(
+            self._target(recording_id, states, details.get(recording_id))
+            for recording_id, states in references.items()
+        )
+        targets = tuple(sorted(targets, key=lambda item: (0 if item.counterpart_state == "fresh_not_found" else 1, item.external_recording_id)))
+        counts = Counter(item.detail_evidence_state for item in targets)
+        return ExternalRecordingDetailPreview(
+            sum(len(item) for item in references.values()), len(targets),
+            sum(item.counterpart_state == "fresh_not_found" for item in targets),
+            sum(item.counterpart_state == "fresh_ambiguous" for item in targets),
+            sum(item.requires_lookup for item in targets),
+            counts["fresh_resolved"], counts["fresh_not_found"], counts["fresh_lookup_failed"],
+            counts["stale"], counts["no_evidence"], targets,
+        )
+
+    def selected(self, limit: int) -> tuple[ExternalRecordingDetailTarget, ...]:
+        if not 1 <= limit <= 20:
+            raise ValueError("limit must be between 1 and 20")
+        return self.preview().targets[:limit]
+
+    def _target(self, recording_id: str, counterpart_states: list[str], detail: ExternalEntityDetailEvidence | None) -> ExternalRecordingDetailTarget:
+        detail_state = _detail_evidence_state(detail, self._now())
+        return ExternalRecordingDetailTarget(
+            recording_id,
+            "fresh_not_found" if "fresh_not_found" in counterpart_states else "fresh_ambiguous",
+            len(counterpart_states), detail_state, detail_state in {"no_evidence", "stale"},
+        )
+
+
+def _detail_evidence_state(detail: ExternalEntityDetailEvidence | None, now: datetime) -> str:
+    if detail is None:
+        return "no_evidence"
+    if detail.fresh_until is not None and _parse_time(detail.fresh_until) <= now:
+        return "stale"
+    return f"fresh_{detail.lookup_state}"
 
 
 def _fresh_resolved_recording_id(evidence_state: str, external_recording_id: str | None) -> str | None:

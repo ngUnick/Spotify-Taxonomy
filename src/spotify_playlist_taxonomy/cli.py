@@ -77,7 +77,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence_review import (
 )
 from spotify_playlist_taxonomy.workflows.external_recording_targets import (
     EXTERNAL_RECORDING_CANDIDATE_STRATUM, EXTERNAL_RECORDING_COMPARISON_CATEGORIES, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonService,
-    ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService,
+    ExternalRecordingDetailTargetProjectionService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService,
 )
 from spotify_playlist_taxonomy.workflows.deterministic_match import (
     TIER_A_POLICY_ID, TierAEligibilityService,
@@ -111,6 +111,7 @@ catalogue_identity_app = typer.Typer(no_args_is_help=True, help="Inspect account
 catalogue_match_app = typer.Typer(no_args_is_help=True, help="Review canonical matching candidates.")
 catalogue_match_deterministic_app = typer.Typer(no_args_is_help=True, help="Read-only deterministic match-policy analysis.")
 catalogue_match_external_recording_app = typer.Typer(no_args_is_help=True, help="Preview local external-recording evidence targets.")
+catalogue_match_external_recording_detail_app = typer.Typer(no_args_is_help=True, help="Preview local MusicBrainz Recording-detail targets.")
 catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit canonical identity links.")
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
 derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characteristics from persisted evidence.")
@@ -141,6 +142,7 @@ catalogue_app.add_typer(catalogue_identity_app, name="identity")
 catalogue_app.add_typer(catalogue_match_app, name="match")
 catalogue_match_app.add_typer(catalogue_match_deterministic_app, name="deterministic")
 catalogue_match_app.add_typer(catalogue_match_external_recording_app, name="external-recording")
+catalogue_match_external_recording_app.add_typer(catalogue_match_external_recording_detail_app, name="detail")
 catalogue_app.add_typer(catalogue_link_app, name="link")
 app.add_typer(research_app, name="research")
 app.add_typer(derive_app, name="derive")
@@ -1315,6 +1317,51 @@ def catalogue_match_external_recording_compare(
                     f"comparison_{index}_external_recording_relationship: {comparison.external_recording_relationship}"
                 )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error: _fail(error)
+
+
+@catalogue_match_external_recording_detail_app.command("preview")
+def catalogue_match_external_recording_detail_preview(
+    limit: int = typer.Option(..., "--limit", min=1, max=20),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show bounded local Recording-detail targets without providers or writes."""
+    try:
+        with _phase3_store(config_path, data_dir) as (_, _, store):
+            if current_schema_version(store.connection) < 18:
+                raise PersistenceError("database requires migration 18; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            service = ExternalRecordingDetailTargetProjectionService(store, binding.binding_id)
+            preview = service.preview()
+            selected = service.selected(limit)
+        _safe_echo(
+            f"eligible_candidate_references: {preview.eligible_candidate_references}\n"
+            f"unique_recording_targets: {preview.unique_recording_targets}\n"
+            f"fresh_not_found_counterpart_targets: {preview.fresh_not_found_counterpart_targets}\n"
+            f"fresh_ambiguous_counterpart_targets: {preview.fresh_ambiguous_counterpart_targets}\n"
+            f"requires_lookup_targets: {preview.requires_lookup_targets}\n"
+            f"fresh_resolved_detail: {preview.fresh_resolved_detail}\n"
+            f"fresh_not_found_detail: {preview.fresh_not_found_detail}\n"
+            f"fresh_lookup_failed_detail: {preview.fresh_lookup_failed_detail}\n"
+            f"stale_detail: {preview.stale_detail}\n"
+            f"no_detail_evidence: {preview.no_detail_evidence}\n"
+            f"selected_targets: {len(selected)}\n"
+            f"selected_not_found_counterpart_targets: {sum(item.counterpart_state == 'fresh_not_found' for item in selected)}\n"
+            f"selected_ambiguous_counterpart_targets: {sum(item.counterpart_state == 'fresh_ambiguous' for item in selected)}\n"
+            f"limit: {limit}\nprovider: musicbrainz\nentity_type: recording\nlookup_method: recording_detail\nnetwork_access: no\nmatching_mutation: no"
+        )
+        for item in selected:
+            _safe_echo(
+                f"external_recording_id: {item.external_recording_id}\n"
+                f"counterpart_state: {item.counterpart_state}\n"
+                f"candidate_reference_count: {item.candidate_reference_count}\n"
+                f"detail_evidence_state: {item.detail_evidence_state}\n"
+                f"requires_lookup: {str(item.requires_lookup).lower()}"
+            )
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
 
 
 @catalogue_match_deterministic_app.command("preview")

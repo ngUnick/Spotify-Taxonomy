@@ -18,11 +18,14 @@ from spotify_playlist_taxonomy.persistence import apply_migrations, connect_data
 from spotify_playlist_taxonomy.persistence.database import load_migrations
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 from spotify_playlist_taxonomy.persistence.identity_external_evidence import IdentityExternalEntityEvidence, IdentityExternalEvidenceStore
+from spotify_playlist_taxonomy.persistence.external_entity_detail import (
+    ExternalEntityDetailEvidence, ExternalEntityDetailStore, detail_content_digest,
+)
 from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceService
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
-from spotify_playlist_taxonomy.workflows.external_recording_targets import EXTERNAL_RECORDING_CANDIDATE_STRATUM, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonMember, ExternalRecordingComparisonService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService, _external_recording_relationship
+from spotify_playlist_taxonomy.workflows.external_recording_targets import EXTERNAL_RECORDING_CANDIDATE_STRATUM, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonMember, ExternalRecordingComparisonService, ExternalRecordingDetailTargetProjectionService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService, _external_recording_relationship
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -70,21 +73,23 @@ class MatchEvidenceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close(); self.temp.cleanup()
 
-    def test_schema_seventeen_migrates_schema_sixteen_and_fresh_database(self) -> None:
+    def test_schema_eighteen_migrates_schema_seventeen_and_fresh_database(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             connection = connect_database(Path(directory) / "older.db")
             migrations = load_migrations()
             connection.execute("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)")
-            for migration in migrations[:16]:
+            for migration in migrations[:17]:
                 connection.executescript(migration.sql)
                 connection.execute("INSERT INTO schema_migrations VALUES (?, ?, ?, 'now')", (migration.version, migration.name, migration.checksum))
             connection.commit()
-            self.assertEqual(17, apply_migrations(connection))
+            self.assertEqual(18, apply_migrations(connection))
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("identity_external_entity_evidence", tables)
+            self.assertIn("external_entity_detail_evidence", tables)
+            self.assertIn("external_entity_detail_isrc_assertions", tables)
             self.assertIn("deterministic_match_decisions", tables)
             connection.close()
-        self.assertEqual(17, apply_migrations(self.connection))
+        self.assertEqual(18, apply_migrations(self.connection))
         self.assertIn(
             "identity_external_entity_evidence",
             {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")},
@@ -406,6 +411,65 @@ class MatchEvidenceTests(unittest.TestCase):
                 target = ExternalRecordingTargetProjectionService._target("identity.synthetic", 1, 0, item, datetime.now(UTC))
                 self.assertEqual((expected_state, requires_lookup), (target.evidence_state, target.requires_lookup))
         self.assertEqual(before, self.connection.total_changes)
+
+    def test_external_entity_detail_store_replaces_normalized_current_detail(self) -> None:
+        store = ExternalEntityDetailStore(self.connection)
+        recording_id = "ABCDEFAB-CDEF-CDEF-CDEF-ABCDEFABCDEF"
+        def detail(state: str = "resolved", available: bool = True, isrcs: tuple[str, ...] = ("us-rc1-76-07839", "GBAYE6800011"), length: int | None = 100000, fresh_until: str | None = "2099-01-01T00:00:00Z") -> ExternalEntityDetailEvidence:
+            normalized = tuple(sorted({value.replace("-", "").upper() for value in isrcs})) if available else ()
+            return ExternalEntityDetailEvidence(
+                "detail.synthetic", "musicbrainz", "recording", recording_id, state,
+                "recording_detail", "synthetic-query", "synthetic.v1", "2026-01-01T00:00:00Z",
+                fresh_until, detail_content_digest(isrcs_available=available, associated_isrcs=normalized, recording_length_ms=length), available, length,
+            )
+        store.upsert(detail(isrcs=("GBAYE6800011", "us-rc1-76-07839", "USRC17607839")), ("GBAYE6800011", "us-rc1-76-07839", "USRC17607839"))
+        current = store.get("musicbrainz", "recording", recording_id)
+        self.assertEqual(("abcdefab-cdef-cdef-cdef-abcdefabcdef", True, 100000), (current.external_id, current.isrcs_available, current.recording_length_ms))
+        self.assertEqual(("GBAYE6800011", "USRC17607839"), tuple(item.normalized_isrc for item in store.isrc_assertions("detail.synthetic")))
+        store.upsert(detail(available=True, isrcs=(), length=None), ())
+        self.assertEqual((), store.isrc_assertions("detail.synthetic"))
+        store.upsert(detail(available=False, isrcs=(), length=None), ())
+        self.assertFalse(store.get("musicbrainz", "recording", recording_id).isrcs_available)
+        self.assertEqual(("abcdefab-cdef-cdef-cdef-abcdefabcdef",), tuple(item.external_id for item in store.for_entities("musicbrainz", "recording", (recording_id,))))
+        with self.assertRaises(ValueError):
+            store.upsert(detail(isrcs=("invalid",)), ("invalid",))
+        self.connection.execute("DELETE FROM external_entity_detail_evidence WHERE evidence_id='detail.synthetic'")
+        self.connection.commit()
+        self.assertEqual(0, self.connection.execute("SELECT COUNT(*) FROM external_entity_detail_isrc_assertions").fetchone()[0])
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(external_entity_detail_evidence)")}
+        self.assertFalse(columns.intersection({"raw_response", "response_body", "payload_json", "metadata"}))
+
+    def test_external_entity_detail_store_preserves_resolved_detail_on_lookup_failure(self) -> None:
+        store = ExternalEntityDetailStore(self.connection)
+        recording_id = "abcdefab-cdef-cdef-cdef-abcdefabcdef"
+        resolved = ExternalEntityDetailEvidence("detail.resolved", "musicbrainz", "recording", recording_id, "resolved", "recording_detail", "query", "synthetic.v1", "2026-01-01T00:00:00Z", "2099-01-01T00:00:00Z", detail_content_digest(isrcs_available=True, associated_isrcs=("USRC17607839",), recording_length_ms=100000), True, 100000)
+        failed = ExternalEntityDetailEvidence("detail.failed", "musicbrainz", "recording", recording_id, "lookup_failed", "recording_detail", "query.failed", "synthetic.v1", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z", detail_content_digest(isrcs_available=False, associated_isrcs=(), recording_length_ms=None), False, None)
+        store.upsert(resolved, ("USRC17607839",)); store.upsert(failed)
+        self.assertEqual("detail.resolved", store.get("musicbrainz", "recording", recording_id).evidence_id)
+
+    def test_external_recording_detail_target_projection_and_preview_cli_are_bounded_local(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100500, version_label=NULL, title='Synthetic' WHERE identity_id='identity.linked.a'")
+        self.connection.execute("UPDATE track_identities SET title='Synthetic' WHERE identity_id='identity.unresolved'")
+        self.connection.commit()
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        recording_id = "abcdefab-cdef-cdef-cdef-abcdefabcdef"
+        evidence.upsert(IdentityExternalEntityEvidence("external.detail.resolved", "identity.unresolved", external_id=recording_id, lookup_state="resolved", **base))
+        evidence.upsert(IdentityExternalEntityEvidence("external.detail.not-found", "identity.linked.a", external_id=None, lookup_state="not_found", **base))
+        before = self.connection.total_changes
+        preview = ExternalRecordingDetailTargetProjectionService(self.store, self.binding.binding_id).preview()
+        self.assertEqual((1, 1, 1, 0, 1, "fresh_not_found", "no_evidence", True), (preview.eligible_candidate_references, preview.unique_recording_targets, preview.fresh_not_found_counterpart_targets, preview.fresh_ambiguous_counterpart_targets, preview.requires_lookup_targets, preview.targets[0].counterpart_state, preview.targets[0].detail_evidence_state, preview.targets[0].requires_lookup))
+        self.assertEqual(before, self.connection.total_changes)
+        database = Path(self.temp.name) / "app.db"; data_dir = Path(self.temp.name) / "detail-preview-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        args = ["catalogue", "match", "external-recording", "detail", "preview", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)]
+        first = CliRunner().invoke(app, args); second = CliRunner().invoke(app, args)
+        self.assertEqual(0, first.exit_code, first.output); self.assertEqual(first.output, second.output)
+        for field in ("eligible_candidate_references: 1", "unique_recording_targets: 1", "selected_targets: 1", "network_access: no", "matching_mutation: no", "external_recording_id:"):
+            self.assertIn(field, first.output)
+        self.assertNotEqual(0, CliRunner().invoke(app, [*args[:6], "--limit", "0", *args[8:]]).exit_code)
+        self.assertNotEqual(0, CliRunner().invoke(app, [*args[:6], "--limit", "21", *args[8:]]).exit_code)
 
     def test_external_recording_preview_cli_is_bounded_deterministic_and_read_only(self) -> None:
         database = Path(self.temp.name) / "app.db"
@@ -829,8 +893,8 @@ class MatchEvidenceTests(unittest.TestCase):
             initialized = runner.invoke(app, ["db", "init", *args])
             self.assertEqual(0, initialized.exit_code, initialized.output)
             connection = connect_database(database)
-            self.assertEqual(17, apply_migrations(connection))
-            self.assertEqual(1, connection.execute("SELECT COUNT(*) FROM schema_migrations WHERE version=17").fetchone()[0])
+            self.assertEqual(18, apply_migrations(connection))
+            self.assertEqual(1, connection.execute("SELECT COUNT(*) FROM schema_migrations WHERE version=18").fetchone()[0])
             self.assertEqual("Synthetic", connection.execute("SELECT display_title FROM canonical_tracks WHERE canonical_track_id='canonical.synthetic.pre15'").fetchone()[0])
             columns = {row[1] for row in connection.execute("PRAGMA table_info(track_identities)")}
             self.assertTrue({"duration_ms", "isrc"}.issubset(columns))

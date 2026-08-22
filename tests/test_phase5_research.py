@@ -359,7 +359,7 @@ class Phase5ResearchTests(unittest.TestCase):
         connection.commit()
         try:
             self.assertEqual(4, current_schema_version(connection))
-            self.assertEqual(17, apply_migrations(connection))
+            self.assertEqual(18, apply_migrations(connection))
             row = connection.execute(
                 "SELECT normalized_value, provider_id, evidence_state FROM research_evidence"
             ).fetchone()
