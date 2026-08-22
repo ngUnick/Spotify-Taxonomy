@@ -76,6 +76,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence_review import (
     MatchEvidenceReviewService,
 )
 from spotify_playlist_taxonomy.workflows.external_recording_targets import (
+    EXTERNAL_RECORDING_COMPARISON_CATEGORIES, ExternalRecordingComparisonService,
     ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService,
 )
 from spotify_playlist_taxonomy.workflows.deterministic_match import (
@@ -1149,6 +1150,43 @@ def catalogue_match_external_recording_fetch(
         _safe_echo("matching_mutations: 0")
     except (OSError, StopIteration, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
         _fail(error)
+
+
+@catalogue_match_external_recording_app.command("status")
+def catalogue_match_external_recording_status(
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Report local external-recording evidence and candidate outcomes without provider access."""
+    try:
+        with _phase3_store(config_path, data_dir) as (_, _, store):
+            if current_schema_version(store.connection) < 17: raise PersistenceError("database requires migration 17; run 'db init'")
+            binding = store.active_account()
+            if binding is None: raise Phase3StateError("an active Spotify account binding is required")
+            report = ExternalRecordingComparisonService(store, binding.binding_id).status()
+        preview = report.target_preview; states = dict(preview.evidence_state_counts); primary = dict(report.primary_counts)
+        for name, value in (("current_candidates", preview.current_candidate_count), ("unique_candidate_identities", preview.unique_candidate_identity_count), ("unique_comparison_identities", preview.unique_comparison_identity_count), ("unique_target_identities", preview.unique_target_identity_count), ("requires_lookup", preview.requires_lookup_count), ("fresh_resolved", states.get("fresh_resolved", 0)), ("fresh_ambiguous", states.get("fresh_ambiguous", 0)), ("fresh_not_found", states.get("fresh_not_found", 0)), ("fresh_insufficient_input", states.get("fresh_insufficient_input", 0)), ("fresh_lookup_failed", states.get("fresh_lookup_failed", 0)), ("stale", states.get("stale", 0)), ("no_evidence", states.get("no_evidence", 0)), ("all_resolved_same_recording", primary.get("all-resolved-same-recording", 0)), ("all_resolved_disagree", primary.get("all-resolved-disagree", 0)), ("partial_resolution", primary.get("partial-resolution", 0)), ("no_resolution", primary.get("no-resolution", 0))): typer.echo(f"{name}: {value}")
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error: _fail(error)
+
+
+@catalogue_match_external_recording_app.command("compare")
+def catalogue_match_external_recording_compare(
+    category: str = typer.Option(..., "--category", help="One of: " + ", ".join(EXTERNAL_RECORDING_COMPARISON_CATEGORIES)),
+    limit: int = typer.Option(..., "--limit", min=1, max=100),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show bounded local candidate external-recording comparisons; never writes or calls providers."""
+    try:
+        with _phase3_store(config_path, data_dir) as (_, _, store):
+            if current_schema_version(store.connection) < 17: raise PersistenceError("database requires migration 17; run 'db init'")
+            binding = store.active_account()
+            if binding is None: raise Phase3StateError("an active Spotify account binding is required")
+            rows = ExternalRecordingComparisonService(store, binding.binding_id).compare(category, limit)
+        for item in rows:
+            _safe_echo(f"candidate_id: {item.candidate_id}\nidentity_id: {item.identity_id}\ncanonical_id: {item.canonical_track_id}\nprimary_outcome: {item.primary_outcome}\nmember_count: {len(item.members)}\nresolved_identity_count: {item.resolved_identity_count}\ndistinct_resolved_recording_count: {item.distinct_resolved_recording_count}")
+            for index, member in enumerate(item.members, 1): _safe_echo(f"member_{index}_identity_id: {member.identity_id}\nmember_{index}_evidence_state: {member.evidence_state}\nmember_{index}_external_recording_id: {member.external_recording_id or '-'}")
+    except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error: _fail(error)
 
 
 @catalogue_match_deterministic_app.command("preview")

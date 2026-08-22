@@ -22,7 +22,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceServ
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
-from spotify_playlist_taxonomy.workflows.external_recording_targets import ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService
+from spotify_playlist_taxonomy.workflows.external_recording_targets import ExternalRecordingComparisonService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -466,6 +466,27 @@ class MatchEvidenceTests(unittest.TestCase):
         self.assertIn("planned: 1", accepted.output)
         self.assertIn("matching_mutations: 0", accepted.output)
         self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "fetch", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
+
+    def test_external_recording_comparison_partitions_candidates_and_flags(self) -> None:
+        store = IdentityExternalEvidenceStore(self.connection)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        for identity_id in ("identity.unresolved", "identity.linked.a", "identity.linked.b"):
+            store.upsert(IdentityExternalEntityEvidence("external." + identity_id, identity_id, external_id="abcdefab-cdef-cdef-cdef-abcdefabcdef", lookup_state="resolved", **base))
+        report = ExternalRecordingComparisonService(self.store, self.binding.binding_id).status()
+        self.assertEqual(("all-resolved-same-recording",), tuple(item.primary_outcome for item in report.comparisons))
+        self.assertEqual(1, sum(dict(report.primary_counts).values()))
+        store.upsert(IdentityExternalEntityEvidence("external.ambiguous", "identity.linked.b", external_id=None, lookup_state="ambiguous", **(base | {"ambiguity_count": 2, "ambiguity_digest": "synthetic"})))
+        item = ExternalRecordingComparisonService(self.store, self.binding.binding_id).status().comparisons[0]
+        self.assertEqual("partial-resolution", item.primary_outcome)
+        self.assertTrue(item.has_ambiguous)
+
+    def test_external_recording_status_and_compare_cli_are_local_and_bounded(self) -> None:
+        database = Path(self.temp.name) / "app.db"; data_dir = Path(self.temp.name) / "external-status-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        status = CliRunner().invoke(app, ["catalogue", "match", "external-recording", "status", "--config", str(CONFIG), "--data-dir", str(data_dir)])
+        compare = CliRunner().invoke(app, ["catalogue", "match", "external-recording", "compare", "--category", "no-resolution", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)])
+        self.assertEqual(0, status.exit_code, status.output); self.assertEqual(0, compare.exit_code, compare.output)
+        self.assertIn("current_candidates: 1", status.output); self.assertEqual(1, sum(line.startswith("candidate_id:") for line in compare.output.splitlines()))
 
     def test_grouped_evidence_cli_renders_complete_synthetic_evidence(self) -> None:
         database = Path(self.temp.name) / "app.db"

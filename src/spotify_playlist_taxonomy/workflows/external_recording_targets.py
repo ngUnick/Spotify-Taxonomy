@@ -185,3 +185,95 @@ class ExternalRecordingEvidenceFetchService:
     @staticmethod
     def _fingerprint(value: object) -> str:
         return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+EXTERNAL_RECORDING_COMPARISON_CATEGORIES = (
+    "all-resolved-same-recording", "all-resolved-disagree", "partial-resolution", "no-resolution",
+    "has-ambiguous", "has-not-found", "has-insufficient-input", "has-lookup-failed", "has-stale", "has-no-evidence",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingComparisonMember:
+    identity_id: str
+    evidence_state: str
+    external_recording_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingCandidateComparison:
+    candidate_id: str
+    identity_id: str
+    canonical_track_id: str
+    primary_outcome: str
+    members: tuple[ExternalRecordingComparisonMember, ...]
+    has_ambiguous: bool
+    has_not_found: bool
+    has_insufficient_input: bool
+    has_lookup_failed: bool
+    has_stale: bool
+    has_no_evidence: bool
+
+    @property
+    def resolved_identity_count(self) -> int:
+        return sum(item.evidence_state == "fresh_resolved" for item in self.members)
+
+    @property
+    def distinct_resolved_recording_count(self) -> int:
+        return len({item.external_recording_id for item in self.members if item.external_recording_id is not None})
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingComparisonStatus:
+    target_preview: ExternalRecordingTargetPreview
+    primary_counts: tuple[tuple[str, int], ...]
+    flag_counts: tuple[tuple[str, int], ...]
+    comparisons: tuple[ExternalRecordingCandidateComparison, ...]
+
+
+class ExternalRecordingComparisonService:
+    """Pure local candidate-level external-evidence analysis; no matching authority."""
+
+    def __init__(self, store: Phase3Store, binding_id: str, now: Callable[[], datetime] | None = None) -> None:
+        self._store, self._binding_id = store, binding_id
+        self._now = now or (lambda: datetime.now(UTC))
+
+    def status(self) -> ExternalRecordingComparisonStatus:
+        targets = ExternalRecordingTargetProjectionService(self._store, self._binding_id, self._now).preview()
+        target_by_id = {item.identity_id: item for item in targets.targets}
+        comparisons = tuple(self._comparison(item, target_by_id) for item in UnresolvedMatchTopologyService(self._store, self._binding_id).candidates())
+        primary = Counter(item.primary_outcome for item in comparisons)
+        flags = Counter()
+        for item in comparisons:
+            for name in ("has_ambiguous", "has_not_found", "has_insufficient_input", "has_lookup_failed", "has_stale", "has_no_evidence"):
+                flags[name] += bool(getattr(item, name))
+        return ExternalRecordingComparisonStatus(targets, tuple(sorted(primary.items())), tuple(sorted(flags.items())), comparisons)
+
+    def compare(self, category: str, limit: int) -> tuple[ExternalRecordingCandidateComparison, ...]:
+        if category not in EXTERNAL_RECORDING_COMPARISON_CATEGORIES:
+            raise ValueError("unknown external recording comparison category")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        attr = category.replace("-", "_")
+        return tuple(item for item in self.status().comparisons if item.primary_outcome == category or bool(getattr(item, attr, False)))[:limit]
+
+    @staticmethod
+    def _comparison(topology, targets: dict[str, ExternalRecordingTarget]) -> ExternalRecordingCandidateComparison:
+        ids = (topology.identity_id, *topology.comparison_identity_ids)
+        members = tuple(ExternalRecordingComparisonMember(item, targets[item].evidence_state, targets[item].external_recording_id) for item in ids)
+        resolved = tuple(item.external_recording_id for item in members if item.evidence_state == "fresh_resolved")
+        if len(resolved) == len(members) and len(set(resolved)) == 1:
+            outcome = "all-resolved-same-recording"
+        elif len(resolved) == len(members):
+            outcome = "all-resolved-disagree"
+        elif resolved:
+            outcome = "partial-resolution"
+        else:
+            outcome = "no-resolution"
+        states = {item.evidence_state for item in members}
+        return ExternalRecordingCandidateComparison(
+            topology.candidate_id, topology.identity_id, topology.canonical_track_id, outcome, members,
+            "fresh_ambiguous" in states, "fresh_not_found" in states,
+            "fresh_insufficient_input" in states, "fresh_lookup_failed" in states,
+            "stale" in states, "no_evidence" in states,
+        )
