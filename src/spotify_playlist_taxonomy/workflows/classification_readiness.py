@@ -1,0 +1,177 @@
+"""Read-only aggregate readiness projection for supervised catalogue classification."""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from enum import StrEnum
+
+from spotify_playlist_taxonomy.config import Phase4Bundle
+from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
+from spotify_playlist_taxonomy.workflows.phase7 import EffectiveReview, Phase7Service
+from spotify_playlist_taxonomy.workflows.phase9 import DesiredState, Phase9Service
+from spotify_playlist_taxonomy.workflows.phase11 import (
+    exact_spotify_population_mappings,
+    is_exact_spotify_population_mapping,
+)
+
+
+class ReadinessBucket(StrEnum):
+    POPULATION_READY = "population_ready"
+    LOCAL_CLASSIFICATION_READY = "local_classification_ready"
+    RESEARCH_NEEDED = "research_needed"
+    REVIEW_BLOCKED = "review_blocked"
+    POPULATION_MAPPING_BLOCKED = "population_mapping_blocked"
+    NO_ACTIONABLE_CLASSIFICATION = "no_actionable_classification"
+
+
+@dataclass(frozen=True, slots=True)
+class ReadinessSelection:
+    canonical_track_id: str
+    bucket: ReadinessBucket
+    next_action: str
+    desired_target_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ClassificationReadinessReport:
+    canonical_tracks_total: int
+    classification_eligible_canonicals: int
+    spotify_population_eligible_canonicals: int
+    qualifying_research_evidence_canonicals: int
+    current_derived_characteristics_canonicals: int
+    current_classification_proposals_canonicals: int
+    effective_include_canonicals: int
+    effective_exclude_canonicals: int
+    effective_abstain_canonicals: int
+    review_required_canonicals: int
+    genre_routing_unresolved_canonicals: int
+    canonicals_with_desired_membership: int
+    desired_memberships_total: int
+    population_ready_canonicals: int
+    local_classification_ready_canonicals: int
+    research_needed_canonicals: int
+    review_blocked_canonicals: int
+    population_mapping_blocked_canonicals: int
+    selected_action: str
+    selections: tuple[ReadinessSelection, ...]
+    target_distribution: tuple[tuple[str, int], ...]
+
+
+class ClassificationReadinessService:
+    """Projects existing Phase 5-9 state only; it owns no mutation or provider dependency."""
+
+    def __init__(self, connection: sqlite3.Connection, bundle: Phase4Bundle) -> None:
+        self.connection = connection
+        self.bundle = bundle
+        self.phase6 = Phase6Service(connection, bundle)
+        self.review = Phase7Service(connection, bundle)
+        self.phase9 = Phase9Service(connection, bundle)
+
+    def report(self, limit: int = 10) -> ClassificationReadinessReport:
+        if not 1 <= limit <= 25:
+            raise ValueError("readiness limit must be between 1 and 25")
+        canonical_ids = tuple(
+            row[0] for row in self.connection.execute(
+                "SELECT canonical_track_id FROM canonical_tracks ORDER BY canonical_track_id"
+            )
+        )
+        qualifying = {row["canonical_track_id"] for row in self.phase6.qualifying_evidence()}
+        current_characteristics = {
+            row[0] for row in self.connection.execute(
+                "SELECT DISTINCT canonical_track_id FROM phase6_characteristic_derivations WHERE state='current'"
+            )
+        }
+        proposal_canonicals = {
+            row[0] for row in self.connection.execute(
+                "SELECT canonical_track_id FROM phase6_proposals UNION SELECT canonical_track_id FROM phase8_codex_proposals"
+            )
+        }
+        effective = self.review.effective_many(canonical_ids)
+        effective_by_canonical: dict[str, list[EffectiveReview]] = {key: [] for key in canonical_ids}
+        for value in effective.values():
+            effective_by_canonical.setdefault(value.canonical_track_id, []).append(value)
+        desired_states = self.phase9.desired_many(canonical_ids)
+        desired_by_canonical = {item.canonical_track_id: item for item in desired_states}
+        mappings = exact_spotify_population_mappings(self.connection)
+        population_eligible = {
+            canonical_id for canonical_id in canonical_ids
+            if is_exact_spotify_population_mapping(mappings.get(canonical_id, ()))
+        }
+        distribution = {target.output_target_id: 0 for target in self.bundle.output_targets.targets}
+        for state in desired_states:
+            for membership in state.memberships:
+                distribution[membership.output_target_id] += 1
+
+        buckets: dict[str, ReadinessSelection] = {}
+        for canonical_id in canonical_ids:
+            reviews = effective_by_canonical[canonical_id]
+            desired = desired_by_canonical[canonical_id]
+            buckets[canonical_id] = self._bucket(
+                canonical_id, desired, reviews, canonical_id in population_eligible,
+                canonical_id in qualifying, canonical_id in current_characteristics,
+                canonical_id in proposal_canonicals,
+            )
+
+        selected_action, selected = self._select(buckets, limit)
+        values = tuple(buckets.values())
+        return ClassificationReadinessReport(
+            canonical_tracks_total=len(canonical_ids),
+            classification_eligible_canonicals=len(canonical_ids),
+            spotify_population_eligible_canonicals=len(population_eligible),
+            qualifying_research_evidence_canonicals=len(qualifying),
+            current_derived_characteristics_canonicals=len(current_characteristics),
+            current_classification_proposals_canonicals=len(proposal_canonicals),
+            effective_include_canonicals=sum(any(item.effective == "include" for item in effective_by_canonical[key]) for key in canonical_ids),
+            effective_exclude_canonicals=sum(any(item.effective == "exclude" for item in effective_by_canonical[key]) for key in canonical_ids),
+            effective_abstain_canonicals=sum(any(item.effective == "abstain" for item in effective_by_canonical[key]) for key in canonical_ids),
+            review_required_canonicals=sum(any(item.needs_review for item in effective_by_canonical[key]) for key in canonical_ids),
+            genre_routing_unresolved_canonicals=sum(bool(item.unresolved) for item in desired_states),
+            canonicals_with_desired_membership=sum(bool(item.memberships) for item in desired_states),
+            desired_memberships_total=sum(len(item.memberships) for item in desired_states),
+            population_ready_canonicals=sum(item.bucket is ReadinessBucket.POPULATION_READY for item in values),
+            local_classification_ready_canonicals=sum(item.bucket is ReadinessBucket.LOCAL_CLASSIFICATION_READY for item in values),
+            research_needed_canonicals=sum(item.bucket is ReadinessBucket.RESEARCH_NEEDED for item in values),
+            review_blocked_canonicals=sum(item.bucket is ReadinessBucket.REVIEW_BLOCKED for item in values),
+            population_mapping_blocked_canonicals=sum(item.bucket is ReadinessBucket.POPULATION_MAPPING_BLOCKED for item in values),
+            selected_action=selected_action,
+            selections=selected,
+            target_distribution=tuple(sorted(distribution.items())),
+        )
+
+    @staticmethod
+    def _bucket(
+        canonical_id: str, desired: DesiredState, reviews: list[EffectiveReview],
+        population_eligible: bool, qualifying_evidence: bool, current_characteristics: bool,
+        has_proposals: bool,
+    ) -> ReadinessSelection:
+        target_ids = tuple(sorted({item.output_target_id for item in desired.memberships}))
+        if target_ids and population_eligible:
+            return ReadinessSelection(canonical_id, ReadinessBucket.POPULATION_READY, "population", target_ids)
+        if any(item.needs_review for item in reviews):
+            return ReadinessSelection(canonical_id, ReadinessBucket.REVIEW_BLOCKED, "review")
+        if not population_eligible:
+            return ReadinessSelection(canonical_id, ReadinessBucket.POPULATION_MAPPING_BLOCKED, "resolve_population_mapping")
+        if qualifying_evidence and (not current_characteristics or not has_proposals):
+            action = "derive_then_classify" if not current_characteristics else "classify"
+            return ReadinessSelection(canonical_id, ReadinessBucket.LOCAL_CLASSIFICATION_READY, action)
+        if not qualifying_evidence:
+            return ReadinessSelection(canonical_id, ReadinessBucket.RESEARCH_NEEDED, "research_then_derive_then_classify")
+        return ReadinessSelection(canonical_id, ReadinessBucket.NO_ACTIONABLE_CLASSIFICATION, "none")
+
+    @staticmethod
+    def _select(
+        buckets: dict[str, ReadinessSelection], limit: int,
+    ) -> tuple[str, tuple[ReadinessSelection, ...]]:
+        for bucket, action in (
+            (ReadinessBucket.POPULATION_READY, "population"),
+            (ReadinessBucket.LOCAL_CLASSIFICATION_READY, "local-classification"),
+            (ReadinessBucket.RESEARCH_NEEDED, "research"),
+        ):
+            values = tuple(
+                buckets[key] for key in sorted(buckets)
+                if buckets[key].bucket is bucket
+            )[:limit]
+            if values:
+                return action, values
+        return "none", ()

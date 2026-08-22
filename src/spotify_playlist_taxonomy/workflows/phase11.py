@@ -32,6 +32,34 @@ class PopulationRecoveryRequired(PopulationError):
     pass
 
 
+def exact_spotify_population_mappings(
+    connection: sqlite3.Connection, canonical_track_ids: tuple[str, ...] | None = None,
+) -> dict[str, tuple[tuple[str, str], ...]]:
+    """Return the provider mappings accepted by the guarded population preflight."""
+
+    values: dict[str, list[tuple[str, str]]] = {}
+    if canonical_track_ids is not None and not canonical_track_ids:
+        return {}
+    query = (
+        "SELECT link.canonical_track_id, ti.identity_id, ti.provider_track_id "
+        "FROM canonical_track_identity_links AS link "
+        "JOIN track_identities AS ti ON ti.identity_id=link.identity_id "
+        "WHERE ti.provider=?"
+    )
+    params: tuple[object, ...] = (IdentityProvider.SPOTIFY.value,)
+    if canonical_track_ids is not None:
+        placeholders = ",".join("?" for _ in canonical_track_ids)
+        query += f" AND link.canonical_track_id IN ({placeholders})"
+        params = (*params, *canonical_track_ids)
+    for row in connection.execute(query + " ORDER BY link.canonical_track_id, ti.identity_id", params):
+        values.setdefault(row["canonical_track_id"], []).append((row["identity_id"], row["provider_track_id"]))
+    return {key: tuple(value) for key, value in values.items()}
+
+
+def is_exact_spotify_population_mapping(rows: tuple[tuple[str, str], ...]) -> bool:
+    return len(rows) == 1 and bool(_SPOTIFY_ID.fullmatch(rows[0][1]))
+
+
 @dataclass(frozen=True, slots=True)
 class PopulationStatus:
     output_target_id: str
@@ -168,16 +196,13 @@ class Phase11Service:
         return _Preflight(target_id, canonical_id, registration["registration_id"], registration["provider_playlist_id"], identity_id, provider_track_id, count, required)
 
     def _mapping(self, canonical_id: str) -> tuple[str, str]:
-        rows = tuple(self.connection.execute(
-            "SELECT ti.identity_id, ti.provider_track_id FROM canonical_track_identity_links link JOIN track_identities ti ON ti.identity_id=link.identity_id WHERE link.canonical_track_id=? AND ti.provider=?",
-            (canonical_id, IdentityProvider.SPOTIFY.value),
-        ))
+        rows = exact_spotify_population_mappings(self.connection, (canonical_id,)).get(canonical_id, ())
         if len(rows) != 1:
             raise PopulationError("canonical track requires exactly one Spotify provider mapping")
-        track_id = rows[0]["provider_track_id"]
+        identity_id, track_id = rows[0]
         if not isinstance(track_id, str) or not _SPOTIFY_ID.fullmatch(track_id):
             raise PopulationError("canonical track Spotify provider mapping is invalid")
-        return rows[0]["identity_id"], track_id
+        return identity_id, track_id
 
     def _membership_count(self, playlist_id: str, provider_track_id: str, reader: MusicPlatformReader) -> int:
         cursor: str | None = None; seen: set[str] = set(); count = 0

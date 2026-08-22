@@ -80,15 +80,38 @@ class Phase9Service:
         }
 
     def desired(self, canonical_track_id: str) -> DesiredState:
+        return self._desired(canonical_track_id)
+
+    def desired_many(self, canonical_track_ids: tuple[str, ...]) -> tuple[DesiredState, ...]:
+        """Project many desired states without changing the Phase 9 routing semantics."""
+
+        effective = self.review.effective_many(canonical_track_ids)
+        routing_values = self._routing_values_many(canonical_track_ids)
+        return tuple(
+            self._desired(canonical_id, effective, routing_values.get(canonical_id, {}))
+            for canonical_id in canonical_track_ids
+        )
+
+    def _desired(
+        self, canonical_track_id: str,
+        effective_many: dict[tuple[str, str], object] | None = None,
+        routing_values: dict[str, str] | None = None,
+    ) -> DesiredState:
         memberships: list[DesiredMembership] = []
         unresolved: list[UnresolvedRouting] = []
         for semantic_id in sorted(self.specifications):
-            effective = self.review.effective(canonical_track_id, semantic_id)
+            effective = (
+                self.review.effective(canonical_track_id, semantic_id)
+                if effective_many is None
+                else effective_many.get((canonical_track_id, semantic_id))
+            )
+            if effective is None:
+                continue
             if effective.effective != "include" or effective.needs_review or effective.stale:
                 continue
             specification = self.specifications[semantic_id]
             if semantic_id.startswith("genre."):
-                outcome, reason = self._route_genre(canonical_track_id)
+                outcome, reason = self._route_genre(canonical_track_id, routing_values)
                 if outcome is RoutingOutcome.UNRESOLVED:
                     unresolved.append(UnresolvedRouting(
                         canonical_track_id, semantic_id, self.bundle.taxonomy.taxonomy_version,
@@ -155,8 +178,10 @@ class Phase9Service:
             for row in rows
         )
 
-    def _route_genre(self, canonical_track_id: str) -> tuple[RoutingOutcome, str]:
-        values = self._routing_values(canonical_track_id)
+    def _route_genre(
+        self, canonical_track_id: str, values: dict[str, str] | None = None,
+    ) -> tuple[RoutingOutcome, str]:
+        values = self._routing_values(canonical_track_id) if values is None else values
         refs = self.bundle.genre_variant_routing.characteristic_references
         lexical = values.get(refs.lyrical_language_profile)
         if lexical is not None:
@@ -192,3 +217,36 @@ class Phase9Service:
             elif isinstance(value, list) and len(value) == 1 and isinstance(value[0], str):
                 values[row["characteristic_name"]] = value[0]
         return values
+
+    def _routing_values_many(self, canonical_track_ids: tuple[str, ...]) -> dict[str, dict[str, str]]:
+        wanted = set(canonical_track_ids)
+        result = {canonical_id: {} for canonical_id in canonical_track_ids}
+        if not wanted:
+            return result
+        references = self.bundle.genre_variant_routing.characteristic_references
+        names = (
+            references.lyrical_language_profile,
+            references.vocal_presence,
+            references.regional_musical_association,
+            references.primary_project_scene_association,
+        )
+        for start in range(0, len(canonical_track_ids), 500):
+            batch = canonical_track_ids[start:start + 500]
+            placeholders = ",".join("?" for _ in batch)
+            name_placeholders = ",".join("?" for _ in names)
+            rows = self.connection.execute(
+                f"SELECT canonical_track_id, characteristic_name, value_json FROM phase6_characteristic_derivations "
+                f"WHERE state='current' AND canonical_track_id IN ({placeholders}) "
+                f"AND characteristic_name IN ({name_placeholders})",
+                (*batch, *names),
+            )
+            for row in rows:
+                try:
+                    value = json.loads(row["value_json"])
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(value, str):
+                    result[row["canonical_track_id"]][row["characteristic_name"]] = value
+                elif isinstance(value, list) and len(value) == 1 and isinstance(value[0], str):
+                    result[row["canonical_track_id"]][row["characteristic_name"]] = value[0]
+        return result

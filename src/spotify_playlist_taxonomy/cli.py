@@ -93,6 +93,7 @@ from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 from spotify_playlist_taxonomy.workflows.phase10 import Phase10Service, ProvisioningError, RecoveryRequiredError
 from spotify_playlist_taxonomy.workflows.phase11 import Phase11Service, PopulationError, PopulationRecoveryRequired
 from spotify_playlist_taxonomy.workflows.phase12 import Phase12Service
+from spotify_playlist_taxonomy.workflows.classification_readiness import ClassificationReadinessService
 
 DEFAULT_CONFIG_PATH = Path("config/application.yaml")
 
@@ -113,6 +114,7 @@ catalogue_match_deterministic_app = typer.Typer(no_args_is_help=True, help="Read
 catalogue_match_external_recording_app = typer.Typer(no_args_is_help=True, help="Preview local external-recording evidence targets.")
 catalogue_match_external_recording_detail_app = typer.Typer(no_args_is_help=True, help="Preview local MusicBrainz Recording-detail targets.")
 catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit canonical identity links.")
+catalogue_classify_app = typer.Typer(no_args_is_help=True, help="Inspect local supervised classification readiness.")
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
 derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characteristics from persisted evidence.")
 classify_app = typer.Typer(no_args_is_help=True, help="Evaluate offline semantic proposals from characteristics.")
@@ -144,6 +146,7 @@ catalogue_match_app.add_typer(catalogue_match_deterministic_app, name="determini
 catalogue_match_app.add_typer(catalogue_match_external_recording_app, name="external-recording")
 catalogue_match_external_recording_app.add_typer(catalogue_match_external_recording_detail_app, name="detail")
 catalogue_app.add_typer(catalogue_link_app, name="link")
+catalogue_app.add_typer(catalogue_classify_app, name="classify")
 app.add_typer(research_app, name="research")
 app.add_typer(derive_app, name="derive")
 app.add_typer(classify_app, name="classify")
@@ -405,6 +408,20 @@ def _phase12_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase
         assert_integrity(connection)
         if current_schema_version(connection) < 14: raise PersistenceError("database requires migration 14; run 'db init'")
         yield Phase12Service(connection, load_phase4_bundle(config_path))
+    finally: connection.close()
+
+
+@contextmanager
+def _classification_readiness_service(
+    config_path: Path, data_dir: Path | None,
+) -> Iterator[ClassificationReadinessService]:
+    config_path = config_path.resolve(); config, _, _ = _load_documents(config_path); paths = _paths(config, data_dir)
+    if not paths.database_path.is_file(): raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 18: raise PersistenceError("database requires migration 18; run 'db init'")
+        yield ClassificationReadinessService(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
 
@@ -1115,6 +1132,43 @@ def catalogue_match_external_recording_preview(
                 f"lookup_reason: {item.lookup_reason}\n"
             )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_classify_app.command("readiness")
+def catalogue_classify_readiness(
+    limit: int = typer.Option(10, "--limit", min=1, max=25),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Aggregate local classification readiness and select one bounded next batch."""
+    try:
+        with _classification_readiness_service(config_path, data_dir) as service:
+            report = service.report(limit)
+        for name in (
+            "canonical_tracks_total", "classification_eligible_canonicals",
+            "spotify_population_eligible_canonicals", "qualifying_research_evidence_canonicals",
+            "current_derived_characteristics_canonicals", "current_classification_proposals_canonicals",
+            "effective_include_canonicals", "effective_exclude_canonicals",
+            "effective_abstain_canonicals", "review_required_canonicals",
+            "genre_routing_unresolved_canonicals", "canonicals_with_desired_membership",
+            "desired_memberships_total", "population_ready_canonicals",
+            "local_classification_ready_canonicals", "research_needed_canonicals",
+            "review_blocked_canonicals", "population_mapping_blocked_canonicals",
+        ):
+            _safe_echo(f"{name}: {getattr(report, name)}")
+        _safe_echo(f"selected_action: {report.selected_action}")
+        _safe_echo(f"selected_canonicals: {len(report.selections)}")
+        _safe_echo(f"limit: {limit}")
+        for item in report.selections:
+            _safe_echo(f"selected_canonical_id: {item.canonical_track_id}")
+            _safe_echo(f"selected_readiness_bucket: {item.bucket.value}")
+            _safe_echo(f"selected_next_action: {item.next_action}")
+            if item.bucket.value == "population_ready":
+                _safe_echo(f"selected_desired_target_ids: {','.join(item.desired_target_ids)}")
+        for target_id, count in report.target_distribution:
+            _safe_echo(f"target_id: {target_id}\tdesired_memberships: {count}")
+    except (OSError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
 
 

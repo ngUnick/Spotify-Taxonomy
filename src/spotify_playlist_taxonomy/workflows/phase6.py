@@ -55,10 +55,7 @@ class Phase6Service:
         self.definitions = {item.characteristic_id: item for item in bundle.vocabulary.characteristics}
 
     def derive(self, canonical_track_id: str) -> tuple[DerivedCharacteristic, ...]:
-        rows = self.connection.execute(
-            "SELECT * FROM research_evidence WHERE canonical_track_id=? AND evidence_state='active' ORDER BY evidence_id",
-            (canonical_track_id,),
-        ).fetchall()
+        rows = self.qualifying_evidence(canonical_track_id)
         candidates: dict[str, list[tuple[sqlite3.Row, Any]]] = {}
         for row in rows:
             if row["subject_match"] != "exact" or row["quality_band"] not in {"high", "medium"}:
@@ -79,6 +76,23 @@ class Phase6Service:
             if item is not None:
                 result.append(item)
         return tuple(result)
+
+    def qualifying_evidence(self, canonical_track_id: str | None = None) -> tuple[sqlite3.Row, ...]:
+        """Return exactly the persisted evidence Phase 6 may derive from, without writes."""
+
+        query = "SELECT * FROM research_evidence WHERE evidence_state='active'"
+        params: tuple[object, ...] = ()
+        if canonical_track_id is not None:
+            query += " AND canonical_track_id=?"
+            params = (canonical_track_id,)
+        rows = self.connection.execute(query + " ORDER BY canonical_track_id, evidence_id", params)
+        return tuple(
+            row for row in rows
+            if row["subject_match"] == "exact"
+            and row["quality_band"] in {"high", "medium"}
+            and (row["evidence_type"] or row["claim_key"]) in self._RULES
+            and row["subject_scope"] in self._RULES[row["evidence_type"] or row["claim_key"]][1]
+        )
 
     def _derive_one(self, canonical_id: str, name: str, asserted: list[tuple[sqlite3.Row, Any]]) -> DerivedCharacteristic | None:
         definition = self.definitions.get(name)

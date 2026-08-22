@@ -52,6 +52,12 @@ class Phase7Service:
     def effective(self, canonical_id: str, logical_id: str) -> EffectiveReview:
         proposals = self._generated(canonical_id, logical_id)
         event = self._latest_event(canonical_id, logical_id)
+        return self._effective_from_rows(canonical_id, logical_id, proposals, event)
+
+    def _effective_from_rows(
+        self, canonical_id: str, logical_id: str, proposals: tuple[sqlite3.Row, ...],
+        event: sqlite3.Row | None,
+    ) -> EffectiveReview:
         explicit = event["decision"] if event is not None and event["action"] == "decide" else None
         decisions = {proposal["decision"] for proposal in proposals}
         disagreement = len(decisions) > 1
@@ -74,6 +80,41 @@ class Phase7Service:
             tuple(proposal["source"] for proposal in proposals),
             disagreement,
         )
+
+    def effective_many(
+        self, canonical_ids: tuple[str, ...] | None = None,
+    ) -> dict[tuple[str, str], EffectiveReview]:
+        """Project all requested effective states with shared Phase 7 precedence semantics."""
+
+        wanted = None if canonical_ids is None else set(canonical_ids)
+        generated: dict[tuple[str, str], list[sqlite3.Row]] = {}
+        rows = self.connection.execute(
+            """
+            SELECT canonical_track_id, logical_playlist_id, proposal_id, decision,
+                   proposal_state, specification_version, 'deterministic' AS source
+            FROM phase6_proposals
+            UNION ALL
+            SELECT canonical_track_id, logical_playlist_id, proposal_id, decision,
+                   'generated' AS proposal_state, specification_version, 'codex' AS source
+            FROM phase8_codex_proposals
+            ORDER BY canonical_track_id, logical_playlist_id, source, proposal_id
+            """
+        )
+        for row in rows:
+            if wanted is None or row["canonical_track_id"] in wanted:
+                generated.setdefault((row["canonical_track_id"], row["logical_playlist_id"]), []).append(row)
+        events: dict[tuple[str, str], sqlite3.Row] = {}
+        for row in self.connection.execute(
+            "SELECT * FROM phase7_review_events ORDER BY canonical_track_id, logical_playlist_id, created_at DESC, rowid DESC"
+        ):
+            key = (row["canonical_track_id"], row["logical_playlist_id"])
+            if (wanted is None or key[0] in wanted) and key not in events:
+                events[key] = row
+        keys = set(generated) | set(events)
+        return {
+            key: self._effective_from_rows(key[0], key[1], tuple(generated.get(key, ())), events.get(key))
+            for key in keys
+        }
 
     def decide(
         self, canonical_id: str, logical_id: str, decision: AssignmentDecision, note: str | None = None
