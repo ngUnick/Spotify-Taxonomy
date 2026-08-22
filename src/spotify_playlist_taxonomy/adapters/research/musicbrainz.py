@@ -14,6 +14,7 @@ from typing import Callable
 import httpx
 
 from spotify_playlist_taxonomy.config import ResearchProviderPolicy
+from spotify_playlist_taxonomy.persistence.external_entity_detail import normalize_associated_isrc
 from spotify_playlist_taxonomy.domain.models import EvidenceKind, ResearchSource
 from spotify_playlist_taxonomy.domain.research import EvidenceType, QualityBand, SubjectMatch, SubjectScope
 from spotify_playlist_taxonomy.ports.research import (
@@ -46,6 +47,19 @@ class MusicBrainzRecordingLookupResult:
     query_fingerprint: str
     adapter_version: str
     retrieved_at: str
+    failure_category: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MusicBrainzRecordingDetailLookupResult:
+    recording_id: str
+    isrcs_available: bool
+    associated_isrcs: tuple[str, ...]
+    length_ms: int | None
+    query_fingerprint: str
+    adapter_version: str
+    retrieved_at: str
+    lookup_state: str
     failure_category: str | None = None
 
 
@@ -189,6 +203,52 @@ class MusicBrainzResearchProvider:
                 return MusicBrainzRecordingLookupResult(normalized_isrc, (), fingerprint, self.policy.adapter_version, _now(), "invalid_response")
             values.add(value.lower())
         return MusicBrainzRecordingLookupResult(normalized_isrc, tuple(sorted(values)), fingerprint, self.policy.adapter_version, _now())
+
+    def lookup_recording_detail(self, recording_id: str) -> MusicBrainzRecordingDetailLookupResult:
+        """Fetch one Recording's ISRC membership and length through the paced direct path."""
+        if not isinstance(recording_id, str) or not _MBID.fullmatch(recording_id):
+            raise ValueError("MusicBrainz Recording ID must be a UUID")
+        normalized_id = recording_id.lower()
+        path = f"{self.policy.api_url.rstrip('/')}/recording/{normalized_id}"
+        params = {"fmt": "json", "inc": "isrcs"}
+        fingerprint = _fingerprint({"url": path, "params": params})
+        response = self._direct_lookup_request(path, params)
+        if isinstance(response, ResearchResult):
+            state = "not_found" if response.status is ProviderOutcomeStatus.NO_RESULT else "lookup_failed"
+            return MusicBrainzRecordingDetailLookupResult(normalized_id, False, (), None, fingerprint, self.policy.adapter_version, response.retrieved_at, state, None if state == "not_found" else response.error_category or "provider_failure")
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            return MusicBrainzRecordingDetailLookupResult(normalized_id, False, (), None, fingerprint, self.policy.adapter_version, _now(), "lookup_failed", "invalid_response")
+        if not isinstance(payload, dict) or not isinstance(payload.get("id"), str) or payload["id"].lower() != normalized_id or not _MBID.fullmatch(payload["id"]):
+            return MusicBrainzRecordingDetailLookupResult(normalized_id, False, (), None, fingerprint, self.policy.adapter_version, _now(), "lookup_failed", "invalid_response")
+        if "isrcs" not in payload:
+            available, isrcs = False, ()
+        elif not isinstance(payload["isrcs"], list):
+            return MusicBrainzRecordingDetailLookupResult(normalized_id, False, (), None, fingerprint, self.policy.adapter_version, _now(), "lookup_failed", "invalid_response")
+        else:
+            try:
+                raw_isrcs = payload["isrcs"]
+                if any(not isinstance(value, str) for value in raw_isrcs):
+                    raise ValueError
+                isrcs = tuple(sorted({normalize_associated_isrc(value) for value in raw_isrcs}))
+            except (TypeError, ValueError):
+                return MusicBrainzRecordingDetailLookupResult(normalized_id, False, (), None, fingerprint, self.policy.adapter_version, _now(), "lookup_failed", "invalid_response")
+            available = True
+        length = payload.get("length")
+        if length is not None and (isinstance(length, bool) or not isinstance(length, int) or length < 0):
+            return MusicBrainzRecordingDetailLookupResult(normalized_id, False, (), None, fingerprint, self.policy.adapter_version, _now(), "lookup_failed", "invalid_response")
+        return MusicBrainzRecordingDetailLookupResult(normalized_id, available, isrcs, length, fingerprint, self.policy.adapter_version, _now(), "resolved")
+
+    def _direct_lookup_request(self, path: str, params: dict[str, str]) -> httpx.Response | ResearchResult:
+        response: httpx.Response | ResearchResult
+        for attempt_number in range(1, self._lookup_max_attempts + 1):
+            response = self._request(path, params)
+            if not isinstance(response, ResearchResult) or response.status is not ProviderOutcomeStatus.TRANSIENT_ERROR:
+                return response
+            if attempt_number < self._lookup_max_attempts:
+                self._sleep(response.retry_after_seconds if response.retry_after_seconds is not None else float(2 ** (attempt_number - 1)))
+        return response
 
     def _request(self, url: str, params: dict[str, str]) -> httpx.Response | ResearchResult:
         self._request_gate.wait_for_turn(self.policy.minimum_interval_seconds)

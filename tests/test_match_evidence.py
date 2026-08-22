@@ -25,7 +25,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceServ
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
-from spotify_playlist_taxonomy.workflows.external_recording_targets import EXTERNAL_RECORDING_CANDIDATE_STRATUM, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonMember, ExternalRecordingComparisonService, ExternalRecordingDetailTargetProjectionService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService, _external_recording_relationship
+from spotify_playlist_taxonomy.workflows.external_recording_targets import EXTERNAL_RECORDING_CANDIDATE_STRATUM, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonMember, ExternalRecordingComparisonService, ExternalRecordingDetailFetchService, ExternalRecordingDetailTargetProjectionService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService, _external_recording_relationship
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -470,6 +470,54 @@ class MatchEvidenceTests(unittest.TestCase):
             self.assertIn(field, first.output)
         self.assertNotEqual(0, CliRunner().invoke(app, [*args[:6], "--limit", "0", *args[8:]]).exit_code)
         self.assertNotEqual(0, CliRunner().invoke(app, [*args[:6], "--limit", "21", *args[8:]]).exit_code)
+
+    def test_external_recording_detail_fetch_persists_and_renders_descriptive_context(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100500, version_label=NULL, title='Synthetic' WHERE identity_id='identity.linked.a'")
+        self.connection.execute("UPDATE track_identities SET title='Synthetic' WHERE identity_id='identity.unresolved'")
+        self.connection.commit()
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        recording_id = "abcdefab-cdef-cdef-cdef-abcdefabcdef"
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        evidence.upsert(IdentityExternalEntityEvidence("external.detail.fetch.resolved", "identity.unresolved", external_id=recording_id, lookup_state="resolved", **base))
+        evidence.upsert(IdentityExternalEntityEvidence("external.detail.fetch.not-found", "identity.linked.a", external_id=None, lookup_state="not_found", **base))
+        class Lookup:
+            calls: list[str] = []
+            def lookup_recording_detail(self, value: str):
+                self.calls.append(value)
+                return type("Result", (), {"lookup_state": "resolved", "isrcs_available": True, "associated_isrcs": ("GBAYE6800011",), "length_ms": 100250, "query_fingerprint": "detail.synthetic", "adapter_version": "synthetic.v1", "retrieved_at": "2099-01-01T00:00:00Z"})()
+        lookup = Lookup(); service = ExternalRecordingDetailFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1)
+        selected = service.plan(5); report = service.fetch(selected, lookup)
+        self.assertEqual((1, 1, 1, 0, 0, 0, 1, 1), (report.planned, report.processed, report.resolved, report.not_found, report.lookup_failed, report.skipped_not_required, report.resolved_with_isrcs, report.resolved_with_length))
+        self.assertEqual([recording_id], lookup.calls)
+        persisted = ExternalEntityDetailStore(self.connection).get("musicbrainz", "recording", recording_id)
+        self.assertEqual(("resolved", True, 100250), (persisted.lookup_state, persisted.isrcs_available, persisted.recording_length_ms))
+        comparison = ExternalRecordingComparisonService(self.store, self.binding.binding_id).compare("partial-resolution", 1)[0].comparisons[0]
+        detail = comparison.recording_detail_contexts[0]
+        self.assertEqual((recording_id, "fresh_resolved", "counterpart-isrc-listed", 100250, 250, 250), (detail.recording_id, detail.detail_evidence_state, detail.counterpart_isrc_relationship, detail.recording_length_ms, detail.candidate_length_delta_ms, detail.comparison_length_delta_ms))
+        self.assertEqual("partial-resolution", ExternalRecordingComparisonService(self.store, self.binding.binding_id).status().comparisons[0].primary_outcome)
+
+    def test_external_recording_detail_fetch_skips_target_that_leaves_current_topology(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100500, version_label=NULL, title='Synthetic' WHERE identity_id='identity.linked.a'")
+        self.connection.execute("UPDATE track_identities SET title='Synthetic' WHERE identity_id='identity.unresolved'")
+        self.connection.commit()
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        recording_id = "abcdefab-cdef-cdef-cdef-abcdefabcdef"
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        evidence.upsert(IdentityExternalEntityEvidence("external.detail.fetch.current", "identity.unresolved", external_id=recording_id, lookup_state="resolved", **base))
+        evidence.upsert(IdentityExternalEntityEvidence("external.detail.fetch.counterpart", "identity.linked.a", external_id=None, lookup_state="not_found", **base))
+        service = ExternalRecordingDetailFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1)
+        selected = service.plan(1)
+        ExternalEntityDetailStore(self.connection).upsert(ExternalEntityDetailEvidence(
+            "detail.now-fresh", "musicbrainz", "recording", recording_id, "resolved", "recording_detail",
+            "synthetic.detail", "synthetic.v1", "2026-01-01T00:00:00Z", "2099-01-01T00:00:00Z",
+            detail_content_digest(isrcs_available=False, associated_isrcs=(), recording_length_ms=None), False, None,
+        ), (), now="2026-01-01T00:00:00Z")
+        class Lookup:
+            def lookup_recording_detail(self, _: str): raise AssertionError("ineligible target must not be requested")
+        report = service.fetch(selected, Lookup())
+        self.assertEqual((1, 0, 1), (report.planned, report.processed, report.skipped_not_required))
 
     def test_external_recording_preview_cli_is_bounded_deterministic_and_read_only(self) -> None:
         database = Path(self.temp.name) / "app.db"

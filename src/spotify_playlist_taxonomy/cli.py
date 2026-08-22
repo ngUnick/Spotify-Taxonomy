@@ -77,7 +77,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence_review import (
 )
 from spotify_playlist_taxonomy.workflows.external_recording_targets import (
     EXTERNAL_RECORDING_CANDIDATE_STRATUM, EXTERNAL_RECORDING_COMPARISON_CATEGORIES, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonService,
-    ExternalRecordingDetailTargetProjectionService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService,
+    ExternalRecordingDetailFetchService, ExternalRecordingDetailTargetProjectionService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService,
 )
 from spotify_playlist_taxonomy.workflows.deterministic_match import (
     TIER_A_POLICY_ID, TierAEligibilityService,
@@ -1316,6 +1316,17 @@ def catalogue_match_external_recording_compare(
                     f"comparison_{index}_comparison_consistency: {comparison.comparison_consistency}\n"
                     f"comparison_{index}_external_recording_relationship: {comparison.external_recording_relationship}"
                 )
+                for detail_index, detail in enumerate(comparison.recording_detail_contexts, 1):
+                    _safe_echo(
+                        f"comparison_{index}_recording_detail_{detail_index}_recording_id: {detail.recording_id}\n"
+                        f"comparison_{index}_recording_detail_{detail_index}_evidence_state: {detail.detail_evidence_state}\n"
+                        f"comparison_{index}_recording_detail_{detail_index}_isrcs_available: {str(detail.isrcs_available).lower() if detail.isrcs_available is not None else '-'}\n"
+                        f"comparison_{index}_recording_detail_{detail_index}_associated_isrc_count: {detail.associated_isrc_count if detail.associated_isrc_count is not None else '-'}\n"
+                        f"comparison_{index}_recording_detail_{detail_index}_counterpart_isrc_relationship: {detail.counterpart_isrc_relationship}\n"
+                        f"comparison_{index}_recording_detail_{detail_index}_recording_length_ms: {detail.recording_length_ms if detail.recording_length_ms is not None else '-'}\n"
+                        f"comparison_{index}_recording_detail_{detail_index}_candidate_length_delta_ms: {detail.candidate_length_delta_ms if detail.candidate_length_delta_ms is not None else '-'}\n"
+                        f"comparison_{index}_recording_detail_{detail_index}_comparison_length_delta_ms: {detail.comparison_length_delta_ms if detail.comparison_length_delta_ms is not None else '-'}"
+                    )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error: _fail(error)
 
 
@@ -1361,6 +1372,47 @@ def catalogue_match_external_recording_detail_preview(
                 f"requires_lookup: {str(item.requires_lookup).lower()}"
             )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_match_external_recording_detail_app.command("fetch")
+def catalogue_match_external_recording_detail_fetch(
+    limit: int = typer.Option(..., "--limit", min=1, max=20),
+    yes: bool = typer.Option(False, "--yes"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Explicitly fetch bounded MusicBrainz Recording details for current targets."""
+    try:
+        with _phase3_store(config_path, data_dir) as (config, _, store):
+            if current_schema_version(store.connection) < 18:
+                raise PersistenceError("database requires migration 18; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            policy = _load_research_policy(config_path, config)
+            provider_policy = next(item for item in policy.providers if item.provider_id == "musicbrainz" and item.enabled)
+            projection = ExternalRecordingDetailTargetProjectionService(store, binding.binding_id)
+            preview = projection.preview()
+            service = ExternalRecordingDetailFetchService(store, binding.binding_id, positive_ttl_hours=policy.positive_ttl_hours, negative_ttl_hours=policy.negative_ttl_hours)
+            selected = service.plan(limit)
+            _safe_echo(
+                f"eligible_candidate_references: {preview.eligible_candidate_references}\nunique_recording_targets: {preview.unique_recording_targets}\n"
+                f"fresh_not_found_counterpart_targets: {preview.fresh_not_found_counterpart_targets}\nfresh_ambiguous_counterpart_targets: {preview.fresh_ambiguous_counterpart_targets}\n"
+                f"requires_lookup_targets: {preview.requires_lookup_targets}\nfresh_resolved_detail: {preview.fresh_resolved_detail}\nfresh_not_found_detail: {preview.fresh_not_found_detail}\n"
+                f"fresh_lookup_failed_detail: {preview.fresh_lookup_failed_detail}\nstale_detail: {preview.stale_detail}\nno_detail_evidence: {preview.no_detail_evidence}\n"
+                f"selected_targets: {len(selected)}\nselected_not_found_counterpart_targets: {sum(item.counterpart_state == 'fresh_not_found' for item in selected)}\n"
+                f"selected_ambiguous_counterpart_targets: {sum(item.counterpart_state == 'fresh_ambiguous' for item in selected)}\nlimit: {limit}\n"
+                "provider: musicbrainz\nentity_type: recording\nlookup_method: recording_detail\nnetwork_access: yes\nmatching_mutation: no"
+            )
+            if not yes and not typer.confirm("Fetch MusicBrainz Recording details for selected distinct Recordings?"):
+                raise typer.Abort()
+            with httpx.Client(timeout=policy.request_timeout_seconds, verify=True, follow_redirects=False, trust_env=False) as client:
+                report = service.fetch(selected, MusicBrainzResearchProvider(client=client, policy=provider_policy, lookup_max_attempts=policy.max_attempts))
+        for name in ("planned", "processed", "resolved", "not_found", "lookup_failed", "skipped_not_required", "resolved_with_isrcs", "resolved_available_empty_isrcs", "resolved_isrcs_unavailable", "resolved_with_length", "resolved_without_length"):
+            _safe_echo(f"{name}: {getattr(report, name)}")
+        _safe_echo("matching_mutations: 0")
+    except (OSError, StopIteration, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
         _fail(error)
 
 

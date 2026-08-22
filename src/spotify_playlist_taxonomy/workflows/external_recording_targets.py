@@ -18,6 +18,7 @@ from spotify_playlist_taxonomy.persistence.identity_external_evidence import (
 from spotify_playlist_taxonomy.persistence.external_entity_detail import (
     ExternalEntityDetailEvidence,
     ExternalEntityDetailStore,
+    detail_content_digest,
 )
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store, _effective_version_cue, _versions_conflict
 from spotify_playlist_taxonomy.workflows.deterministic_match import ComparisonConsistency, evaluate_comparison_consistency
@@ -338,6 +339,85 @@ def _detail_evidence_state(detail: ExternalEntityDetailEvidence | None, now: dat
     return f"fresh_{detail.lookup_state}"
 
 
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingDetailFetchReport:
+    planned: int
+    processed: int
+    resolved: int
+    not_found: int
+    lookup_failed: int
+    skipped_not_required: int
+    resolved_with_isrcs: int
+    resolved_available_empty_isrcs: int
+    resolved_isrcs_unavailable: int
+    resolved_with_length: int
+    resolved_without_length: int
+
+
+class ExternalRecordingDetailFetchService:
+    """Explicit bounded Recording-detail acquisition with no matching mutation."""
+
+    def __init__(self, store: Phase3Store, binding_id: str, *, positive_ttl_hours: int, negative_ttl_hours: int, now: Callable[[], datetime] | None = None) -> None:
+        self._store, self._binding_id = store, binding_id
+        self._positive_ttl_hours, self._negative_ttl_hours = positive_ttl_hours, negative_ttl_hours
+        self._now = now or (lambda: datetime.now(UTC))
+
+    def plan(self, limit: int) -> tuple[ExternalRecordingDetailTarget, ...]:
+        if not 1 <= limit <= 20:
+            raise ValueError("limit must be between 1 and 20")
+        return tuple(item for item in ExternalRecordingDetailTargetProjectionService(self._store, self._binding_id, self._now).preview().targets if item.requires_lookup)[:limit]
+
+    def fetch(self, selected: tuple[ExternalRecordingDetailTarget, ...], lookup: object) -> ExternalRecordingDetailFetchReport:
+        counts: Counter[str] = Counter(planned=len(selected))
+        detail_store = ExternalEntityDetailStore(self._store.connection)
+        for target in selected:
+            current = {item.external_recording_id: item for item in ExternalRecordingDetailTargetProjectionService(self._store, self._binding_id, self._now).preview().targets}
+            current_target = current.get(target.external_recording_id)
+            if current_target is None or not current_target.requires_lookup:
+                counts["skipped_not_required"] += 1
+                continue
+            counts["processed"] += 1
+            try:
+                result = lookup.lookup_recording_detail(target.external_recording_id)
+            except Exception:
+                result = None
+            state = getattr(result, "lookup_state", "lookup_failed")
+            if state not in {"resolved", "not_found"}:
+                state = "lookup_failed"
+            isrcs_available = bool(getattr(result, "isrcs_available", False)) if state == "resolved" else False
+            isrcs = tuple(getattr(result, "associated_isrcs", ())) if state == "resolved" else ()
+            length = getattr(result, "length_ms", None) if state == "resolved" else None
+            retrieved = getattr(result, "retrieved_at", None) or self._now().isoformat().replace("+00:00", "Z")
+            try:
+                stamp = _parse_time(retrieved)
+            except (TypeError, ValueError):
+                stamp = self._now(); retrieved = stamp.isoformat().replace("+00:00", "Z")
+            ttl = self._positive_ttl_hours if state == "resolved" else self._negative_ttl_hours
+            digest = detail_content_digest(isrcs_available=isrcs_available, associated_isrcs=tuple(sorted(isrcs)) if isrcs_available else (), recording_length_ms=length)
+            item = ExternalEntityDetailEvidence(
+                "external-entity-detail." + hashlib.sha256((target.external_recording_id + "\0musicbrainz\0recording").encode()).hexdigest()[:24],
+                "musicbrainz", "recording", target.external_recording_id, state, "recording_detail",
+                getattr(result, "query_fingerprint", None) or hashlib.sha256(target.external_recording_id.encode()).hexdigest(),
+                getattr(result, "adapter_version", None) or "musicbrainz-detail.v1", retrieved,
+                (stamp + timedelta(hours=ttl)).isoformat().replace("+00:00", "Z"), digest, isrcs_available, length,
+            )
+            try:
+                detail_store.upsert(item, isrcs, now=retrieved)
+            except (TypeError, ValueError):
+                state = "lookup_failed"
+                item = ExternalEntityDetailEvidence(item.evidence_id, item.provider, item.entity_type, item.external_id, state, item.lookup_method, item.query_fingerprint, item.adapter_version, item.retrieved_at, item.fresh_until, detail_content_digest(isrcs_available=False, associated_isrcs=(), recording_length_ms=None), False, None)
+                detail_store.upsert(item, (), now=retrieved)
+            counts[state] += 1
+            if state == "resolved":
+                counts["resolved_with_isrcs" if isrcs else "resolved_available_empty_isrcs" if isrcs_available else "resolved_isrcs_unavailable"] += 1
+                counts["resolved_with_length" if length is not None else "resolved_without_length"] += 1
+        return ExternalRecordingDetailFetchReport(*(counts[name] for name in (
+            "planned", "processed", "resolved", "not_found", "lookup_failed", "skipped_not_required",
+            "resolved_with_isrcs", "resolved_available_empty_isrcs", "resolved_isrcs_unavailable",
+            "resolved_with_length", "resolved_without_length",
+        )))
+
+
 def _fresh_resolved_recording_id(evidence_state: str, external_recording_id: str | None) -> str | None:
     if evidence_state != "fresh_resolved" or external_recording_id is None:
         return None
@@ -370,6 +450,19 @@ class ExternalRecordingComparisonMember:
     version_relationship: str | None = None
     comparison_consistency: str | None = None
     external_recording_relationship: str | None = None
+    recording_detail_contexts: tuple["ExternalRecordingDetailContext", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingDetailContext:
+    recording_id: str
+    detail_evidence_state: str
+    isrcs_available: bool | None
+    associated_isrc_count: int | None
+    counterpart_isrc_relationship: str
+    recording_length_ms: int | None
+    candidate_length_delta_ms: int | None
+    comparison_length_delta_ms: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,7 +542,11 @@ class ExternalRecordingComparisonService:
             for item in ids
         )
         candidate = members[0]
-        comparisons = tuple(self._pairwise_member(candidate, item) for item in members[1:])
+        recording_ids = tuple(sorted({recording_id for item in members if (recording_id := _fresh_resolved_recording_id(item.evidence_state, item.external_recording_id)) is not None}))
+        detail_store = ExternalEntityDetailStore(self._store.connection)
+        details = {item.external_id: item for item in detail_store.for_entities("musicbrainz", "recording", recording_ids)}
+        assertions = {recording_id: {item.normalized_isrc for item in detail_store.isrc_assertions(detail.evidence_id)} for recording_id, detail in details.items()}
+        comparisons = tuple(self._pairwise_member(candidate, item, details, assertions) for item in members[1:])
         consistency = evaluate_comparison_consistency(tuple(
             (
                 candidate.isrc is not None and item.isrc is not None and candidate.isrc == item.isrc,
@@ -495,13 +592,19 @@ class ExternalRecordingComparisonService:
             for row in rows
         }
 
-    @staticmethod
-    def _pairwise_member(candidate: ExternalRecordingComparisonMember, comparison: ExternalRecordingComparisonMember) -> ExternalRecordingComparisonMember:
+    def _pairwise_member(self, candidate: ExternalRecordingComparisonMember, comparison: ExternalRecordingComparisonMember, details: dict[str, ExternalEntityDetailEvidence], assertions: dict[str, set[str]]) -> ExternalRecordingComparisonMember:
         duration_delta = None if candidate.duration_ms is None or comparison.duration_ms is None else abs(candidate.duration_ms - comparison.duration_ms)
         isrc_relationship = "missing" if candidate.isrc is None or comparison.isrc is None else "same" if candidate.isrc == comparison.isrc else "different"
         version_relationship = "unknown" if candidate.effective_version_cue is None or comparison.effective_version_cue is None else "conflict" if _versions_conflict(candidate.effective_version_cue, comparison.effective_version_cue) else "compatible"
         pair = evaluate_comparison_consistency(((isrc_relationship == "same", duration_delta, version_relationship == "conflict"),))
         external_relationship = _external_recording_relationship(candidate, comparison)
+        contexts = tuple(
+            self._detail_context(recording_id, details.get(recording_id), assertions.get(recording_id, set()), counterpart, candidate, comparison)
+            for recording_id, counterpart in (
+                (item, comparison if item == _fresh_resolved_recording_id(candidate.evidence_state, candidate.external_recording_id) else candidate)
+                for item in tuple(dict.fromkeys(filter(None, (_fresh_resolved_recording_id(candidate.evidence_state, candidate.external_recording_id), _fresh_resolved_recording_id(comparison.evidence_state, comparison.external_recording_id)))))
+            )
+        )
         return replace(
             comparison,
             duration_delta_ms=duration_delta,
@@ -509,6 +612,22 @@ class ExternalRecordingComparisonService:
             version_relationship=version_relationship,
             comparison_consistency="consistent" if not (pair.any_isrc_mismatch or pair.any_duration_over_threshold or pair.any_version_conflict) else "inconsistent",
             external_recording_relationship=external_relationship,
+            recording_detail_contexts=contexts,
+        )
+
+    def _detail_context(self, recording_id: str, detail: ExternalEntityDetailEvidence | None, assertion_set: set[str], counterpart: ExternalRecordingComparisonMember, candidate: ExternalRecordingComparisonMember, comparison: ExternalRecordingComparisonMember) -> ExternalRecordingDetailContext:
+        state = _detail_evidence_state(detail, self._now())
+        usable_counterpart = _has_usable_isrc(counterpart.isrc)
+        relationship = "unavailable"
+        if state == "fresh_resolved" and detail is not None and detail.isrcs_available and usable_counterpart:
+            relationship = "counterpart-isrc-listed" if counterpart.isrc in assertion_set else "counterpart-isrc-not-listed"
+        length = detail.recording_length_ms if state == "fresh_resolved" and detail is not None else None
+        return ExternalRecordingDetailContext(
+            recording_id, state, detail.isrcs_available if detail is not None and state == "fresh_resolved" else None,
+            len(assertion_set) if detail is not None and state == "fresh_resolved" and detail.isrcs_available else None,
+            relationship, length,
+            None if length is None or candidate.duration_ms is None else abs(candidate.duration_ms - length),
+            None if length is None or comparison.duration_ms is None else abs(comparison.duration_ms - length),
         )
 
 

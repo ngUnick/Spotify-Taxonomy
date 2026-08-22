@@ -435,6 +435,40 @@ class ProviderAdapterTests(unittest.TestCase):
             failed = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy).lookup_recordings_by_isrc("USRC17607839")
         self.assertEqual("provider_temporarily_unavailable", failed.failure_category)
 
+    def test_musicbrainz_recording_detail_lookup_is_bounded_normalized_and_fail_closed(self) -> None:
+        requests: list[httpx.Request] = []
+        def handler(value: httpx.Request) -> httpx.Response:
+            requests.append(value)
+            return httpx.Response(200, json={"id": MBID.upper(), "isrcs": ["gbaye6800011", "US-RC1-76-07839", "USRC17607839"], "length": 100000, "ignored": {"raw": "never retained"}})
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            result = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy).lookup_recording_detail(MBID.upper())
+        self.assertEqual((MBID, True, ("GBAYE6800011", "USRC17607839"), 100000, "resolved"), (result.recording_id, result.isrcs_available, result.associated_isrcs, result.length_ms, result.lookup_state))
+        self.assertEqual(("/ws/2/recording/" + MBID, "isrcs", self.musicbrainz_policy.user_agent), (requests[0].url.path, requests[0].url.params["inc"], requests[0].headers["User-Agent"]))
+        with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"id": MBID, "isrcs": [], "length": None}))) as client:
+            empty = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy).lookup_recording_detail(MBID)
+        self.assertEqual((True, (), None), (empty.isrcs_available, empty.associated_isrcs, empty.length_ms))
+        calls = 0
+        with httpx.Client(transport=httpx.MockTransport(lambda _: (_ for _ in ()).throw(AssertionError("invalid ID must not call")))) as client:
+            provider = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy)
+            with self.assertRaises(ValueError): provider.lookup_recording_detail("invalid")
+        for payload in ({"id": MBID, "isrcs": ["invalid"]}, {"id": MBID, "isrcs": None}, {"id": MBID, "length": -1}, {"id": "invalid"}, {"id": MBID, "length": "100"}):
+            with self.subTest(payload=payload), httpx.Client(transport=httpx.MockTransport(lambda _, value=payload: httpx.Response(200, json=value))) as client:
+                failed = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy).lookup_recording_detail(MBID)
+            self.assertEqual("lookup_failed", failed.lookup_state)
+
+    def test_musicbrainz_recording_detail_reuses_direct_retry_and_pacing(self) -> None:
+        class Clock:
+            def __init__(self) -> None: self.value = 0.0; self.sleeps: list[float] = []
+            def monotonic(self) -> float: return self.value
+            def sleep(self, seconds: float) -> None: self.sleeps.append(seconds); self.value += seconds
+        clock = Clock(); gate = MusicBrainzRequestGate(monotonic=clock.monotonic, sleep=clock.sleep); calls = 0
+        def handler(_: httpx.Request) -> httpx.Response:
+            nonlocal calls; calls += 1
+            return httpx.Response(429, headers={"Retry-After": "1"}) if calls == 1 else httpx.Response(200, json={"id": MBID})
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            result = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy, request_gate=gate, lookup_max_attempts=2, sleep=clock.sleep).lookup_recording_detail(MBID)
+        self.assertEqual(("resolved", 2, [1.0]), (result.lookup_state, calls, clock.sleeps))
+
     def test_policy_rejects_unapproved_endpoint_and_unknown_provider(self) -> None:
         payload = self.musicbrainz_policy.model_dump(mode="json")
         payload["api_url"] = "https://example.invalid/ws"
