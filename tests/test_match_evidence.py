@@ -22,7 +22,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceServ
 from spotify_playlist_taxonomy.workflows.match_evidence_backfill import MatchEvidenceBackfillService
 from spotify_playlist_taxonomy.workflows.match_evidence_review import MatchEvidenceReviewService
 from spotify_playlist_taxonomy.workflows.deterministic_match import TierAEligibilityService, evaluate_comparison_consistency
-from spotify_playlist_taxonomy.workflows.external_recording_targets import ExternalRecordingComparisonService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService
+from spotify_playlist_taxonomy.workflows.external_recording_targets import ExternalRecordingCandidateFetchService, ExternalRecordingComparisonService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "application.yaml"
@@ -487,6 +487,71 @@ class MatchEvidenceTests(unittest.TestCase):
         compare = CliRunner().invoke(app, ["catalogue", "match", "external-recording", "compare", "--category", "no-resolution", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)])
         self.assertEqual(0, status.exit_code, status.output); self.assertEqual(0, compare.exit_code, compare.output)
         self.assertIn("current_candidates: 1", status.output); self.assertEqual(1, sum(line.startswith("candidate_id:") for line in compare.output.splitlines()))
+
+    def test_external_recording_candidate_fetch_plan_is_complete_prioritized_and_fail_closed(self) -> None:
+        service = ExternalRecordingCandidateFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        plan = service.plan(1, 3)
+        self.assertEqual((0, 1, 0, 1, 3, False), (plan.completable_partial_candidates, plan.completable_no_resolution_candidates, plan.blocked_candidates, len(plan.selected_bundles), len(plan.required_lookup_identity_ids), plan.exceeds_identity_limit))
+        self.assertEqual(3, len(plan.selected_bundles[0].member_identity_ids))
+        self.assertTrue(service.plan(1, 2).exceeds_identity_limit)
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        evidence.upsert(IdentityExternalEntityEvidence("external.resolved", "identity.unresolved", external_id="abcdefab-cdef-cdef-cdef-abcdefabcdef", lookup_state="resolved", **base))
+        partial = service.plan(1, 2)
+        self.assertEqual((1, 0, 1, False), (partial.completable_partial_candidates, partial.completable_no_resolution_candidates, partial.already_resolved_members, partial.exceeds_identity_limit))
+        evidence.upsert(IdentityExternalEntityEvidence("external.ambiguous", "identity.linked.a", external_id=None, lookup_state="ambiguous", **(base | {"ambiguity_count": 2, "ambiguity_digest": "synthetic"})))
+        blocked = service.plan(1, 3)
+        self.assertEqual((0, 0, 1), (blocked.completable_partial_candidates, blocked.completable_no_resolution_candidates, blocked.blocked_candidates))
+
+    def test_external_recording_candidate_fetch_executes_whole_bundle_and_preserves_matching(self) -> None:
+        candidates = self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall()
+        service = ExternalRecordingCandidateFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        class Lookup:
+            calls: list[str] = []
+            def lookup_recordings_by_isrc(self, isrc: str) -> MusicBrainzRecordingLookupResult:
+                self.calls.append(isrc)
+                return MusicBrainzRecordingLookupResult(isrc, ("abcdefab-cdef-cdef-cdef-abcdefabcdef",), "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z")
+        lookup = Lookup()
+        report = service.fetch(service.plan(1, 3), lookup)
+        self.assertEqual((1, 1, 3, 3, 3, 0, 0, 0, 0, 0, 0), tuple(getattr(report, name) for name in ("planned_candidates", "processed_candidates", "planned_lookup_identities", "processed_lookup_identities", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh", "skipped_candidate_not_completable")))
+        self.assertEqual(3, len(lookup.calls))
+        self.assertEqual(candidates, self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall())
+        self.assertEqual(0, self.connection.execute("SELECT COUNT(*) FROM deterministic_match_decisions").fetchone()[0])
+
+    def test_external_recording_candidate_fetch_planner_treats_stale_as_retryable_and_terminal_states_as_blocked(self) -> None:
+        service = ExternalRecordingCandidateFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        evidence.upsert(IdentityExternalEntityEvidence("external.stale", "identity.linked.a", external_id=None, lookup_state="stale", **base))
+        self.assertEqual(1, service.plan(1, 3).completable_no_resolution_candidates)
+        for state in ("ambiguous", "not_found", "insufficient_input", "lookup_failed"):
+            with self.subTest(state=state):
+                evidence.upsert(IdentityExternalEntityEvidence("external." + state, "identity.linked.a", external_id=None, lookup_state=state, **(base | ({"ambiguity_count": 2, "ambiguity_digest": "synthetic"} if state == "ambiguous" else {}))))
+                plan = service.plan(1, 3)
+                self.assertEqual((0, 0, 1), (plan.completable_partial_candidates, plan.completable_no_resolution_candidates, plan.blocked_candidates))
+
+    def test_external_recording_candidate_fetch_rechecks_candidate_before_network(self) -> None:
+        service = ExternalRecordingCandidateFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        plan = service.plan(1, 3)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=2, ambiguity_digest="synthetic")
+        IdentityExternalEvidenceStore(self.connection).upsert(IdentityExternalEntityEvidence("external.terminal", "identity.linked.a", external_id=None, lookup_state="ambiguous", **base))
+        class Lookup:
+            calls = 0
+            def lookup_recordings_by_isrc(self, isrc: str): self.calls += 1; raise AssertionError("must not call provider")
+        lookup = Lookup(); report = service.fetch(plan, lookup)
+        self.assertEqual((0, 1), (report.processed_lookup_identities, report.skipped_candidate_not_completable))
+        self.assertEqual(0, lookup.calls)
+
+    def test_external_recording_candidate_fetch_cli_requires_limits_confirmation_and_respects_overflow(self) -> None:
+        database = Path(self.temp.name) / "app.db"; data_dir = Path(self.temp.name) / "external-candidate-fetch-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        base = ["catalogue", "match", "external-recording", "fetch-candidates", "--candidate-limit", "1", "--identity-limit", "3", "--config", str(CONFIG), "--data-dir", str(data_dir)]
+        declined = CliRunner().invoke(app, base, input="n\n")
+        self.assertNotEqual(0, declined.exit_code); self.assertIn("selected_candidates: 1", declined.output)
+        self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "fetch-candidates", "--candidate-limit", "1", "--identity-limit", "2", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
+        self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "fetch-candidates", "--candidate-limit", "0", "--identity-limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
+        self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "fetch-candidates", "--candidate-limit", "21", "--identity-limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
+        self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "fetch-candidates", "--candidate-limit", "1", "--identity-limit", "101", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
 
     def test_grouped_evidence_cli_renders_complete_synthetic_evidence(self) -> None:
         database = Path(self.temp.name) / "app.db"

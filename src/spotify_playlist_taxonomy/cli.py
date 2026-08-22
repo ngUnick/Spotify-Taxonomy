@@ -76,7 +76,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence_review import (
     MatchEvidenceReviewService,
 )
 from spotify_playlist_taxonomy.workflows.external_recording_targets import (
-    EXTERNAL_RECORDING_COMPARISON_CATEGORIES, ExternalRecordingComparisonService,
+    EXTERNAL_RECORDING_COMPARISON_CATEGORIES, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonService,
     ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService,
 )
 from spotify_playlist_taxonomy.workflows.deterministic_match import (
@@ -1146,6 +1146,54 @@ def catalogue_match_external_recording_fetch(
             with httpx.Client(timeout=policy.request_timeout_seconds, verify=True, follow_redirects=False, trust_env=False) as client:
                 report = service.fetch(limit, MusicBrainzResearchProvider(client=client, policy=provider_policy))
         for name in ("planned", "processed", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh"):
+            _safe_echo(f"{name}: {getattr(report, name)}")
+        _safe_echo("matching_mutations: 0")
+    except (OSError, StopIteration, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
+@catalogue_match_external_recording_app.command("fetch-candidates")
+def catalogue_match_external_recording_fetch_candidates(
+    candidate_limit: int = typer.Option(..., "--candidate-limit", min=1, max=20),
+    identity_limit: int = typer.Option(..., "--identity-limit", min=1, max=100),
+    yes: bool = typer.Option(False, "--yes"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Fetch complete, bounded unresolved-candidate evidence bundles only."""
+    try:
+        config_path = config_path.resolve()
+        with _phase3_store(config_path, data_dir) as (config, _, store):
+            if current_schema_version(store.connection) < 17:
+                raise PersistenceError("database requires migration 17; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            policy = _load_research_policy(config_path, config)
+            provider_policy = next(item for item in policy.providers if item.provider_id == "musicbrainz" and item.enabled)
+            service = ExternalRecordingCandidateFetchService(
+                store, binding.binding_id, positive_ttl_hours=policy.positive_ttl_hours,
+                negative_ttl_hours=policy.negative_ttl_hours, ambiguous_ttl_hours=policy.ambiguous_ttl_hours,
+            )
+            plan = service.plan(candidate_limit, identity_limit)
+            _safe_echo(
+                f"completable_partial_candidates: {plan.completable_partial_candidates}\n"
+                f"completable_no_resolution_candidates: {plan.completable_no_resolution_candidates}\n"
+                f"blocked_candidates: {plan.blocked_candidates}\nselected_candidates: {len(plan.selected_bundles)}\n"
+                f"selected_partial_candidates: {sum(item.primary_outcome == 'partial-resolution' for item in plan.selected_bundles)}\n"
+                f"selected_no_resolution_candidates: {sum(item.primary_outcome == 'no-resolution' for item in plan.selected_bundles)}\n"
+                f"selected_member_identities: {plan.selected_member_identities}\nalready_resolved_members: {plan.already_resolved_members}\n"
+                f"required_lookup_identities: {len(plan.required_lookup_identity_ids)}\ncandidate_limit: {candidate_limit}\nidentity_limit: {identity_limit}\n"
+                "provider: musicbrainz\nentity_type: recording\nlookup_method: isrc\nnetwork_access: yes\nmatching_mutation: no"
+            )
+            if plan.exceeds_identity_limit:
+                _safe_echo("reason: candidate_bundle_exceeds_identity_limit")
+                raise typer.Exit(code=2)
+            if not yes and not typer.confirm("Fetch MusicBrainz Recording evidence for complete selected candidate bundles?"):
+                raise typer.Abort()
+            with httpx.Client(timeout=policy.request_timeout_seconds, verify=True, follow_redirects=False, trust_env=False) as client:
+                report = service.fetch(plan, MusicBrainzResearchProvider(client=client, policy=provider_policy))
+        for name in ("planned_candidates", "processed_candidates", "planned_lookup_identities", "processed_lookup_identities", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh", "skipped_candidate_not_completable"):
             _safe_echo(f"{name}: {getattr(report, name)}")
         _safe_echo("matching_mutations: 0")
     except (OSError, StopIteration, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:

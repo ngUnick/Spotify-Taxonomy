@@ -137,7 +137,10 @@ class ExternalRecordingEvidenceFetchService:
         return tuple(item for item in ExternalRecordingTargetProjectionService(self._store, self._binding_id, self._now).preview().targets if item.requires_lookup)[:limit]
 
     def fetch(self, limit: int, lookup: RecordingLookup) -> ExternalRecordingFetchReport:
-        selected = self.plan(limit)
+        return self.fetch_targets(self.plan(limit), lookup)
+
+    def fetch_targets(self, selected: tuple[ExternalRecordingTarget, ...], lookup: RecordingLookup) -> ExternalRecordingFetchReport:
+        """Fetch an explicit, already-bounded target set without changing matching state."""
         counts: Counter[str] = Counter(planned=len(selected))
         evidence_store = IdentityExternalEvidenceStore(self._store.connection)
         for target in selected:
@@ -277,3 +280,119 @@ class ExternalRecordingComparisonService:
             "fresh_insufficient_input" in states, "fresh_lookup_failed" in states,
             "stale" in states, "no_evidence" in states,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingCandidateFetchBundle:
+    candidate_id: str
+    primary_outcome: str
+    member_identity_ids: tuple[str, ...]
+    lookup_identity_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingCandidateFetchPlan:
+    completable_partial_candidates: int
+    completable_no_resolution_candidates: int
+    blocked_candidates: int
+    selected_bundles: tuple[ExternalRecordingCandidateFetchBundle, ...]
+    selected_member_identities: int
+    already_resolved_members: int
+    required_lookup_identity_ids: tuple[str, ...]
+    candidate_limit: int
+    identity_limit: int
+    exceeds_identity_limit: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingCandidateFetchReport:
+    planned_candidates: int
+    processed_candidates: int
+    planned_lookup_identities: int
+    processed_lookup_identities: int
+    resolved: int
+    ambiguous: int
+    not_found: int
+    insufficient_input: int
+    lookup_failed: int
+    skipped_fresh: int
+    skipped_candidate_not_completable: int
+
+
+class ExternalRecordingCandidateFetchService:
+    """Bounded complete-candidate evidence acquisition; it has no matching authority."""
+
+    def __init__(self, store: Phase3Store, binding_id: str, *, positive_ttl_hours: int, negative_ttl_hours: int, ambiguous_ttl_hours: int, now: Callable[[], datetime] | None = None) -> None:
+        self._store, self._binding_id = store, binding_id
+        self._positive_ttl_hours, self._negative_ttl_hours = positive_ttl_hours, negative_ttl_hours
+        self._ambiguous_ttl_hours, self._now = ambiguous_ttl_hours, now or (lambda: datetime.now(UTC))
+
+    def plan(self, candidate_limit: int, identity_limit: int) -> ExternalRecordingCandidateFetchPlan:
+        if not 1 <= candidate_limit <= 20:
+            raise ValueError("candidate_limit must be between 1 and 20")
+        if not 1 <= identity_limit <= 100:
+            raise ValueError("identity_limit must be between 1 and 100")
+        status = ExternalRecordingComparisonService(self._store, self._binding_id, self._now).status()
+        targets = {item.identity_id: item for item in status.target_preview.targets}
+        partial_source = tuple(item for item in status.comparisons if item.primary_outcome == "partial-resolution")
+        no_resolution_source = tuple(item for item in status.comparisons if item.primary_outcome == "no-resolution")
+        partial = tuple(self._bundle(item, targets) for item in partial_source)
+        no_resolution = tuple(self._bundle(item, targets) for item in no_resolution_source)
+        partial = tuple(item for item in partial if item is not None)
+        no_resolution = tuple(item for item in no_resolution if item is not None)
+        selected = (partial + no_resolution)[:candidate_limit]
+        lookup_ids = tuple(sorted({identity_id for item in selected for identity_id in item.lookup_identity_ids}))
+        selected_ids = {identity_id for item in selected for identity_id in item.member_identity_ids}
+        resolved = sum(targets[identity_id].evidence_state == "fresh_resolved" for identity_id in selected_ids)
+        return ExternalRecordingCandidateFetchPlan(
+            len(partial), len(no_resolution), len(partial_source) + len(no_resolution_source) - len(partial) - len(no_resolution),
+            selected, len(selected_ids), resolved, lookup_ids, candidate_limit, identity_limit,
+            len(lookup_ids) > identity_limit,
+        )
+
+    @staticmethod
+    def _bundle(item: ExternalRecordingCandidateComparison, targets: dict[str, ExternalRecordingTarget], *, allow_complete: bool = False) -> ExternalRecordingCandidateFetchBundle | None:
+        members = tuple(member.identity_id for member in item.members)
+        member_targets = tuple(targets[identity_id] for identity_id in members)
+        if not all(target.evidence_state == "fresh_resolved" or target.requires_lookup for target in member_targets):
+            return None
+        if not any(target.requires_lookup for target in member_targets) and not allow_complete:
+            return None
+        return ExternalRecordingCandidateFetchBundle(item.candidate_id, item.primary_outcome, members, tuple(target.identity_id for target in member_targets if target.requires_lookup))
+
+    def fetch(self, plan: ExternalRecordingCandidateFetchPlan, lookup: RecordingLookup) -> ExternalRecordingCandidateFetchReport:
+        if plan.exceeds_identity_limit:
+            raise ValueError("candidate_bundle_exceeds_identity_limit")
+        counts: Counter[str] = Counter(planned_candidates=len(plan.selected_bundles), planned_lookup_identities=len(plan.required_lookup_identity_ids))
+        seen_lookup_ids: set[str] = set()
+        for bundle in plan.selected_bundles:
+            refreshed = self.plan_for_candidate(bundle.candidate_id)
+            if refreshed is None:
+                counts["skipped_candidate_not_completable"] += 1
+                continue
+            targets = ExternalRecordingTargetProjectionService(self._store, self._binding_id, self._now).preview().targets
+            current_by_id = {item.identity_id: item for item in targets}
+            pending = tuple(current_by_id[identity_id] for identity_id in refreshed.member_identity_ids if current_by_id[identity_id].requires_lookup and identity_id not in seen_lookup_ids)
+            if not pending:
+                counts["skipped_fresh"] += len(refreshed.member_identity_ids)
+                continue
+            report = ExternalRecordingEvidenceFetchService(
+                self._store, self._binding_id, positive_ttl_hours=self._positive_ttl_hours,
+                negative_ttl_hours=self._negative_ttl_hours, ambiguous_ttl_hours=self._ambiguous_ttl_hours, now=self._now,
+            ).fetch_targets(pending, lookup)
+            seen_lookup_ids.update(item.identity_id for item in pending)
+            counts["processed_candidates"] += 1
+            for name in ("processed", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh"):
+                counts["processed_lookup_identities" if name == "processed" else name] += getattr(report, name)
+        return ExternalRecordingCandidateFetchReport(*(counts[name] for name in (
+            "planned_candidates", "processed_candidates", "planned_lookup_identities", "processed_lookup_identities",
+            "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh", "skipped_candidate_not_completable",
+        )))
+
+    def plan_for_candidate(self, candidate_id: str) -> ExternalRecordingCandidateFetchBundle | None:
+        status = ExternalRecordingComparisonService(self._store, self._binding_id, self._now).status()
+        targets = {item.identity_id: item for item in status.target_preview.targets}
+        for item in status.comparisons:
+            if item.candidate_id == candidate_id:
+                return self._bundle(item, targets, allow_complete=True)
+        return None
