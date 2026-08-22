@@ -21,6 +21,7 @@ from spotify_playlist_taxonomy.persistence.external_entity_detail import (
     detail_content_digest,
 )
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store, _effective_version_cue, _versions_conflict
+from spotify_playlist_taxonomy.domain.policies import normalize_identity_text
 from spotify_playlist_taxonomy.workflows.deterministic_match import ComparisonConsistency, evaluate_comparison_consistency
 from spotify_playlist_taxonomy.workflows.match_topology import UnresolvedMatchTopologyService
 
@@ -244,6 +245,7 @@ EXTERNAL_RECORDING_COMPARISON_CATEGORIES = (
 )
 
 EXTERNAL_RECORDING_CANDIDATE_STRATUM = "different-isrc-duration-le-500ms-no-version-conflict-single-comparison"
+EXTERNAL_RECORDING_DETAIL_SCOPES = ("partial", "all-resolved-same")
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,29 +284,16 @@ def select_external_recording_detail_targets(
 class ExternalRecordingDetailTargetProjectionService:
     """Local projection of distinct Recording-detail targets; no provider surface."""
 
-    def __init__(self, store: Phase3Store, binding_id: str, now: Callable[[], datetime] | None = None) -> None:
+    def __init__(self, store: Phase3Store, binding_id: str, now: Callable[[], datetime] | None = None, *, scope: str = "partial") -> None:
+        if scope not in EXTERNAL_RECORDING_DETAIL_SCOPES:
+            raise ValueError("unknown external recording detail scope")
         self._store, self._binding_id = store, binding_id
         self._now = now or (lambda: datetime.now(UTC))
+        self._scope = scope
 
     def preview(self) -> ExternalRecordingDetailPreview:
         comparison_status = ExternalRecordingComparisonService(self._store, self._binding_id, self._now).status()
-        references: dict[str, list[str]] = {}
-        for item in comparison_status.comparisons:
-            if not ExternalRecordingCandidateFetchService._matches_stratum(item, EXTERNAL_RECORDING_CANDIDATE_STRATUM):
-                continue
-            if len(item.comparisons) != 1:
-                continue
-            comparison = item.comparisons[0]
-            candidate_id = _fresh_resolved_recording_id(item.candidate.evidence_state, item.candidate.external_recording_id)
-            comparison_id = _fresh_resolved_recording_id(comparison.evidence_state, comparison.external_recording_id)
-            if (candidate_id is None) == (comparison_id is None):
-                continue
-            counterpart = comparison if candidate_id is not None else item.candidate
-            if counterpart.evidence_state not in {"fresh_not_found", "fresh_ambiguous"}:
-                continue
-            recording_id = candidate_id or comparison_id
-            assert recording_id is not None
-            references.setdefault(recording_id, []).append(counterpart.evidence_state)
+        references = self._references(comparison_status.comparisons)
         details = {
             item.external_id: item
             for item in ExternalEntityDetailStore(self._store.connection).for_entities(
@@ -315,7 +304,7 @@ class ExternalRecordingDetailTargetProjectionService:
             self._target(recording_id, states, details.get(recording_id))
             for recording_id, states in references.items()
         )
-        targets = tuple(sorted(targets, key=lambda item: (0 if item.counterpart_state == "fresh_not_found" else 1, item.external_recording_id)))
+        targets = tuple(sorted(targets, key=lambda item: ({"fresh_not_found": 0, "fresh_ambiguous": 1}.get(item.counterpart_state, 2), item.external_recording_id)))
         counts = Counter(item.detail_evidence_state for item in targets)
         return ExternalRecordingDetailPreview(
             sum(len(item) for item in references.values()), len(targets),
@@ -329,11 +318,69 @@ class ExternalRecordingDetailTargetProjectionService:
     def selected(self, limit: int) -> tuple[ExternalRecordingDetailTarget, ...]:
         return select_external_recording_detail_targets(self.preview().targets, limit)
 
+    def _references(self, comparisons: tuple["ExternalRecordingCandidateComparison", ...]) -> dict[str, list[str]]:
+        references: dict[str, list[str]] = {}
+        for item in comparisons:
+            if self._scope == "partial":
+                recording_id, state = self._partial_reference(item)
+            else:
+                recording_id, state = self._same_recording_reference(item)
+            if recording_id is not None and state is not None:
+                references.setdefault(recording_id, []).append(state)
+        return references
+
+    @staticmethod
+    def _partial_reference(item: "ExternalRecordingCandidateComparison") -> tuple[str | None, str | None]:
+        if not ExternalRecordingCandidateFetchService._matches_stratum(item, EXTERNAL_RECORDING_CANDIDATE_STRATUM) or len(item.comparisons) != 1:
+            return None, None
+        comparison = item.comparisons[0]
+        candidate_id = _fresh_resolved_recording_id(item.candidate.evidence_state, item.candidate.external_recording_id)
+        comparison_id = _fresh_resolved_recording_id(comparison.evidence_state, comparison.external_recording_id)
+        if (candidate_id is None) == (comparison_id is None):
+            return None, None
+        counterpart = comparison if candidate_id is not None else item.candidate
+        if counterpart.evidence_state not in {"fresh_not_found", "fresh_ambiguous"}:
+            return None, None
+        return candidate_id or comparison_id, counterpart.evidence_state
+
+    def _same_recording_reference(self, item: "ExternalRecordingCandidateComparison") -> tuple[str | None, str | None]:
+        if item.primary_outcome != "all-resolved-same-recording" or len(item.comparisons) != 1:
+            return None, None
+        comparison = item.comparisons[0]
+        candidate_id = _fresh_resolved_recording_id(item.candidate.evidence_state, item.candidate.external_recording_id)
+        comparison_id = _fresh_resolved_recording_id(comparison.evidence_state, comparison.external_recording_id)
+        if candidate_id is None or candidate_id != comparison_id:
+            return None, None
+        if not _has_usable_isrc(item.candidate.isrc) or not _has_usable_isrc(comparison.isrc) or item.candidate.isrc == comparison.isrc:
+            return None, None
+        if (
+            comparison.duration_delta_ms is None or comparison.duration_delta_ms > 500
+            or any(not isinstance(member.duration_ms, int) or isinstance(member.duration_ms, bool) or member.duration_ms < 0 for member in (item.candidate, comparison))
+            or comparison.version_relationship == "conflict"
+        ):
+            return None, None
+        if not self._context_coherent(item.canonical_track_id, item.candidate) or not self._context_coherent(item.canonical_track_id, comparison):
+            return None, None
+        return candidate_id, "all_resolved_same"
+
+    def _context_coherent(self, canonical_track_id: str, member: "ExternalRecordingComparisonMember") -> bool:
+        canonical = self._store.connection.execute("SELECT display_title FROM canonical_tracks WHERE canonical_track_id=?", (canonical_track_id,)).fetchone()
+        if canonical is None:
+            return False
+        artists = tuple(row[0] for row in self._store.connection.execute(
+            "SELECT artist_name FROM canonical_track_artists WHERE canonical_track_id=? ORDER BY position", (canonical_track_id,)
+        ))
+        return (
+            normalize_identity_text(member.title), tuple(sorted(normalize_identity_text(value) for value in member.artists))
+        ) == (
+            normalize_identity_text(canonical["display_title"]), tuple(sorted(normalize_identity_text(value) for value in artists))
+        )
+
     def _target(self, recording_id: str, counterpart_states: list[str], detail: ExternalEntityDetailEvidence | None) -> ExternalRecordingDetailTarget:
         detail_state = _detail_evidence_state(detail, self._now())
         return ExternalRecordingDetailTarget(
             recording_id,
-            "fresh_not_found" if "fresh_not_found" in counterpart_states else "fresh_ambiguous",
+            "fresh_not_found" if "fresh_not_found" in counterpart_states else "fresh_ambiguous" if "fresh_ambiguous" in counterpart_states else "all_resolved_same",
             len(counterpart_states), detail_state, detail_state in {"no_evidence", "stale"},
         )
 
@@ -364,19 +411,20 @@ class ExternalRecordingDetailFetchReport:
 class ExternalRecordingDetailFetchService:
     """Explicit bounded Recording-detail acquisition with no matching mutation."""
 
-    def __init__(self, store: Phase3Store, binding_id: str, *, positive_ttl_hours: int, negative_ttl_hours: int, now: Callable[[], datetime] | None = None) -> None:
+    def __init__(self, store: Phase3Store, binding_id: str, *, positive_ttl_hours: int, negative_ttl_hours: int, now: Callable[[], datetime] | None = None, scope: str = "partial") -> None:
         self._store, self._binding_id = store, binding_id
         self._positive_ttl_hours, self._negative_ttl_hours = positive_ttl_hours, negative_ttl_hours
         self._now = now or (lambda: datetime.now(UTC))
+        self._scope = scope
 
     def plan(self, limit: int) -> tuple[ExternalRecordingDetailTarget, ...]:
-        return ExternalRecordingDetailTargetProjectionService(self._store, self._binding_id, self._now).selected(limit)
+        return ExternalRecordingDetailTargetProjectionService(self._store, self._binding_id, self._now, scope=self._scope).selected(limit)
 
     def fetch(self, selected: tuple[ExternalRecordingDetailTarget, ...], lookup: object) -> ExternalRecordingDetailFetchReport:
         counts: Counter[str] = Counter(planned=len(selected))
         detail_store = ExternalEntityDetailStore(self._store.connection)
         for target in selected:
-            current = {item.external_recording_id: item for item in ExternalRecordingDetailTargetProjectionService(self._store, self._binding_id, self._now).preview().targets}
+            current = {item.external_recording_id: item for item in ExternalRecordingDetailTargetProjectionService(self._store, self._binding_id, self._now, scope=self._scope).preview().targets}
             current_target = current.get(target.external_recording_id)
             if current_target is None or not current_target.requires_lookup:
                 counts["skipped_not_required"] += 1
@@ -465,6 +513,8 @@ class ExternalRecordingDetailContext:
     isrcs_available: bool | None
     associated_isrc_count: int | None
     counterpart_isrc_relationship: str
+    candidate_isrc_membership: str
+    comparison_isrc_membership: str
     recording_length_ms: int | None
     candidate_length_delta_ms: int | None
     comparison_length_delta_ms: int | None
@@ -622,15 +672,17 @@ class ExternalRecordingComparisonService:
 
     def _detail_context(self, recording_id: str, detail: ExternalEntityDetailEvidence | None, assertion_set: set[str], counterpart: ExternalRecordingComparisonMember, candidate: ExternalRecordingComparisonMember, comparison: ExternalRecordingComparisonMember) -> ExternalRecordingDetailContext:
         state = _detail_evidence_state(detail, self._now())
-        usable_counterpart = _has_usable_isrc(counterpart.isrc)
-        relationship = "unavailable"
-        if state == "fresh_resolved" and detail is not None and detail.isrcs_available and usable_counterpart:
-            relationship = "counterpart-isrc-listed" if counterpart.isrc in assertion_set else "counterpart-isrc-not-listed"
+        def membership(isrc: str | None) -> str:
+            if state != "fresh_resolved" or detail is None or not detail.isrcs_available or not _has_usable_isrc(isrc):
+                return "unavailable"
+            return "listed" if isrc in assertion_set else "not-listed"
+        counterpart_membership = membership(counterpart.isrc)
+        relationship = "counterpart-isrc-" + counterpart_membership if counterpart_membership != "unavailable" else "unavailable"
         length = detail.recording_length_ms if state == "fresh_resolved" and detail is not None else None
         return ExternalRecordingDetailContext(
             recording_id, state, detail.isrcs_available if detail is not None and state == "fresh_resolved" else None,
             len(assertion_set) if detail is not None and state == "fresh_resolved" and detail.isrcs_available else None,
-            relationship, length,
+            relationship, membership(candidate.isrc), membership(comparison.isrc), length,
             None if length is None or candidate.duration_ms is None else abs(candidate.duration_ms - length),
             None if length is None or comparison.duration_ms is None else abs(comparison.duration_ms - length),
         )

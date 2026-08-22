@@ -76,7 +76,7 @@ from spotify_playlist_taxonomy.workflows.match_evidence_review import (
     MatchEvidenceReviewService,
 )
 from spotify_playlist_taxonomy.workflows.external_recording_targets import (
-    EXTERNAL_RECORDING_CANDIDATE_STRATUM, EXTERNAL_RECORDING_COMPARISON_CATEGORIES, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonService,
+    EXTERNAL_RECORDING_CANDIDATE_STRATUM, EXTERNAL_RECORDING_COMPARISON_CATEGORIES, EXTERNAL_RECORDING_DETAIL_SCOPES, ExternalRecordingCandidateFetchService, ExternalRecordingComparisonService,
     ExternalRecordingDetailFetchService, ExternalRecordingDetailTargetProjectionService, ExternalRecordingEvidenceFetchService, ExternalRecordingTargetProjectionService,
 )
 from spotify_playlist_taxonomy.workflows.deterministic_match import (
@@ -1323,6 +1323,8 @@ def catalogue_match_external_recording_compare(
                         f"comparison_{index}_recording_detail_{detail_index}_isrcs_available: {str(detail.isrcs_available).lower() if detail.isrcs_available is not None else '-'}\n"
                         f"comparison_{index}_recording_detail_{detail_index}_associated_isrc_count: {detail.associated_isrc_count if detail.associated_isrc_count is not None else '-'}\n"
                         f"comparison_{index}_recording_detail_{detail_index}_counterpart_isrc_relationship: {detail.counterpart_isrc_relationship}\n"
+                        f"comparison_{index}_recording_detail_{detail_index}_candidate_isrc_membership: {detail.candidate_isrc_membership}\n"
+                        f"comparison_{index}_recording_detail_{detail_index}_comparison_isrc_membership: {detail.comparison_isrc_membership}\n"
                         f"comparison_{index}_recording_detail_{detail_index}_recording_length_ms: {detail.recording_length_ms if detail.recording_length_ms is not None else '-'}\n"
                         f"comparison_{index}_recording_detail_{detail_index}_candidate_length_delta_ms: {detail.candidate_length_delta_ms if detail.candidate_length_delta_ms is not None else '-'}\n"
                         f"comparison_{index}_recording_detail_{detail_index}_comparison_length_delta_ms: {detail.comparison_length_delta_ms if detail.comparison_length_delta_ms is not None else '-'}"
@@ -1333,6 +1335,7 @@ def catalogue_match_external_recording_compare(
 @catalogue_match_external_recording_detail_app.command("preview")
 def catalogue_match_external_recording_detail_preview(
     limit: int = typer.Option(..., "--limit", min=1, max=20),
+    scope: str = typer.Option("partial", "--scope", help="Detail target scope: " + ", ".join(EXTERNAL_RECORDING_DETAIL_SCOPES)),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
     data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
 ) -> None:
@@ -1344,7 +1347,7 @@ def catalogue_match_external_recording_detail_preview(
             binding = store.active_account()
             if binding is None:
                 raise Phase3StateError("an active Spotify account binding is required")
-            service = ExternalRecordingDetailTargetProjectionService(store, binding.binding_id)
+            service = ExternalRecordingDetailTargetProjectionService(store, binding.binding_id, scope=scope)
             preview = service.preview()
             selected = service.selected(limit)
         _safe_echo(
@@ -1361,7 +1364,7 @@ def catalogue_match_external_recording_detail_preview(
             f"selected_targets: {len(selected)}\n"
             f"selected_not_found_counterpart_targets: {sum(item.counterpart_state == 'fresh_not_found' for item in selected)}\n"
             f"selected_ambiguous_counterpart_targets: {sum(item.counterpart_state == 'fresh_ambiguous' for item in selected)}\n"
-            f"limit: {limit}\nprovider: musicbrainz\nentity_type: recording\nlookup_method: recording_detail\nnetwork_access: no\nmatching_mutation: no"
+            f"limit: {limit}\nscope: {scope}\nprovider: musicbrainz\nentity_type: recording\nlookup_method: recording_detail\nnetwork_access: no\nmatching_mutation: no"
         )
         for item in selected:
             _safe_echo(
@@ -1378,6 +1381,7 @@ def catalogue_match_external_recording_detail_preview(
 @catalogue_match_external_recording_detail_app.command("fetch")
 def catalogue_match_external_recording_detail_fetch(
     limit: int = typer.Option(..., "--limit", min=1, max=20),
+    scope: str = typer.Option("partial", "--scope", help="Detail target scope: " + ", ".join(EXTERNAL_RECORDING_DETAIL_SCOPES)),
     yes: bool = typer.Option(False, "--yes"),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
     data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
@@ -1392,9 +1396,9 @@ def catalogue_match_external_recording_detail_fetch(
                 raise Phase3StateError("an active Spotify account binding is required")
             policy = _load_research_policy(config_path, config)
             provider_policy = next(item for item in policy.providers if item.provider_id == "musicbrainz" and item.enabled)
-            projection = ExternalRecordingDetailTargetProjectionService(store, binding.binding_id)
+            projection = ExternalRecordingDetailTargetProjectionService(store, binding.binding_id, scope=scope)
             preview = projection.preview()
-            service = ExternalRecordingDetailFetchService(store, binding.binding_id, positive_ttl_hours=policy.positive_ttl_hours, negative_ttl_hours=policy.negative_ttl_hours)
+            service = ExternalRecordingDetailFetchService(store, binding.binding_id, positive_ttl_hours=policy.positive_ttl_hours, negative_ttl_hours=policy.negative_ttl_hours, scope=scope)
             selected = service.plan(limit)
             _safe_echo(
                 f"eligible_candidate_references: {preview.eligible_candidate_references}\nunique_recording_targets: {preview.unique_recording_targets}\n"
@@ -1402,7 +1406,7 @@ def catalogue_match_external_recording_detail_fetch(
                 f"requires_lookup_targets: {preview.requires_lookup_targets}\nfresh_resolved_detail: {preview.fresh_resolved_detail}\nfresh_not_found_detail: {preview.fresh_not_found_detail}\n"
                 f"fresh_lookup_failed_detail: {preview.fresh_lookup_failed_detail}\nstale_detail: {preview.stale_detail}\nno_detail_evidence: {preview.no_detail_evidence}\n"
                 f"selected_targets: {len(selected)}\nselected_not_found_counterpart_targets: {sum(item.counterpart_state == 'fresh_not_found' for item in selected)}\n"
-                f"selected_ambiguous_counterpart_targets: {sum(item.counterpart_state == 'fresh_ambiguous' for item in selected)}\nlimit: {limit}\n"
+                f"selected_ambiguous_counterpart_targets: {sum(item.counterpart_state == 'fresh_ambiguous' for item in selected)}\nlimit: {limit}\nscope: {scope}\n"
                 "provider: musicbrainz\nentity_type: recording\nlookup_method: recording_detail\nnetwork_access: yes\nmatching_mutation: no"
             )
             if not yes and not typer.confirm("Fetch MusicBrainz Recording details for selected distinct Recordings?"):

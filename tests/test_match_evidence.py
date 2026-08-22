@@ -494,6 +494,50 @@ class MatchEvidenceTests(unittest.TestCase):
         self.assertEqual(2, len(select_external_recording_detail_targets(universe, 2)))
         self.assertEqual(3, len(selected))
 
+    def test_all_resolved_same_recording_detail_scope_is_cross_isrc_fail_closed_and_descriptive(self) -> None:
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
+        self.connection.execute("UPDATE track_identities SET title='Synthetic', version_label=NULL WHERE identity_id IN ('identity.unresolved', 'identity.linked.a')")
+        self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100250 WHERE identity_id='identity.linked.a'")
+        self.connection.commit()
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        recording_id = "abcdefab-cdef-cdef-cdef-abcdefabcdef"
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        for identity_id in ("identity.unresolved", "identity.linked.a"):
+            evidence.upsert(IdentityExternalEntityEvidence("external.same." + identity_id, identity_id, external_id=recording_id, lookup_state="resolved", **base))
+        projection = ExternalRecordingDetailTargetProjectionService(self.store, self.binding.binding_id, scope="all-resolved-same")
+        preview = projection.preview()
+        self.assertEqual((1, 1, 1, "all_resolved_same", True), (preview.eligible_candidate_references, preview.unique_recording_targets, preview.requires_lookup_targets, preview.targets[0].counterpart_state, preview.targets[0].requires_lookup))
+        service = ExternalRecordingDetailFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, scope="all-resolved-same")
+        self.assertEqual(projection.selected(5), service.plan(5))
+        details = ExternalEntityDetailStore(self.connection)
+        details.upsert(ExternalEntityDetailEvidence("detail.same", "musicbrainz", "recording", recording_id, "resolved", "recording_detail", "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z", "2099-01-01T00:00:00Z", detail_content_digest(isrcs_available=True, associated_isrcs=("GBAYE6800011", "USRC17607839"), recording_length_ms=100100), True, 100100), ("USRC17607839", "GBAYE6800011"))
+        self.assertEqual((), projection.selected(5))
+        context = ExternalRecordingComparisonService(self.store, self.binding.binding_id).compare("all-resolved-same-recording", 1)[0].comparisons[0].recording_detail_contexts[0]
+        self.assertEqual(("listed", "listed", 100, 150), (context.candidate_isrc_membership, context.comparison_isrc_membership, context.candidate_length_delta_ms, context.comparison_length_delta_ms))
+        self.connection.execute("DELETE FROM external_entity_detail_evidence WHERE external_id=?", (recording_id,)); self.connection.commit()
+        self.assertEqual((recording_id,), tuple(item.external_recording_id for item in projection.selected(5)))
+        for state, fresh_until in (("not_found", "2099-01-01T00:00:00Z"), ("lookup_failed", "2099-01-01T00:00:00Z"), ("resolved", "2000-01-01T00:00:00Z")):
+            details.upsert(ExternalEntityDetailEvidence("detail." + state, "musicbrainz", "recording", recording_id, state, "recording_detail", "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z", fresh_until, detail_content_digest(isrcs_available=False, associated_isrcs=(), recording_length_ms=None), False, None))
+            self.assertEqual(state == "resolved", bool(projection.selected(5)))
+        selected = service.plan(5)
+        details.upsert(ExternalEntityDetailEvidence("detail.recheck", "musicbrainz", "recording", recording_id, "not_found", "recording_detail", "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z", "2099-01-01T00:00:00Z", detail_content_digest(isrcs_available=False, associated_isrcs=(), recording_length_ms=None), False, None))
+        class Lookup:
+            def lookup_recording_detail(self, _: str): raise AssertionError("fresh detail must skip provider")
+        report = service.fetch(selected, Lookup())
+        self.assertEqual((1, 0, 1), (report.planned, report.processed, report.skipped_not_required))
+        self.assertEqual(0, self.connection.execute("SELECT COUNT(*) FROM deterministic_match_decisions").fetchone()[0])
+        details.upsert(ExternalEntityDetailEvidence("detail.clear", "musicbrainz", "recording", recording_id, "resolved", "recording_detail", "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z", "2000-01-01T00:00:00Z", detail_content_digest(isrcs_available=False, associated_isrcs=(), recording_length_ms=None), False, None))
+        for field, value in (("isrc", "USRC17607839"), ("duration_ms", 100751)):
+            self.connection.execute(f"UPDATE track_identities SET {field}=? WHERE identity_id='identity.linked.a'", (value,)); self.connection.commit()
+            self.assertEqual(0, projection.preview().unique_recording_targets)
+            self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100250, version_label=NULL WHERE identity_id='identity.linked.a'"); self.connection.commit()
+        self.connection.execute("UPDATE track_identities SET version_label='live' WHERE identity_id='identity.unresolved'")
+        self.connection.execute("UPDATE track_identities SET version_label='acoustic' WHERE identity_id='identity.linked.a'"); self.connection.commit()
+        self.assertEqual(0, projection.preview().unique_recording_targets)
+        self.connection.execute("UPDATE track_identities SET version_label=NULL WHERE identity_id IN ('identity.unresolved', 'identity.linked.a')"); self.connection.commit()
+        evidence.upsert(IdentityExternalEntityEvidence("external.same.ambiguous", "identity.linked.a", external_id=None, lookup_state="ambiguous", **(base | {"ambiguity_count": 2, "ambiguity_digest": "synthetic"})))
+        self.assertEqual(0, projection.preview().unique_recording_targets)
+
     def test_external_recording_detail_fetch_persists_and_renders_descriptive_context(self) -> None:
         self.connection.execute("DELETE FROM account_canonical_identity_links WHERE identity_id='identity.linked.b'")
         self.connection.execute("UPDATE track_identities SET isrc='GBAYE6800011', duration_ms=100500, version_label=NULL, title='Synthetic' WHERE identity_id='identity.linked.a'")
