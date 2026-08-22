@@ -1144,7 +1144,7 @@ def catalogue_match_external_recording_fetch(
             if not yes and not typer.confirm("Fetch bounded MusicBrainz Recording evidence for selected identities?"):
                 raise typer.Abort()
             with httpx.Client(timeout=policy.request_timeout_seconds, verify=True, follow_redirects=False, trust_env=False) as client:
-                report = service.fetch(limit, MusicBrainzResearchProvider(client=client, policy=provider_policy))
+                report = service.fetch(limit, MusicBrainzResearchProvider(client=client, policy=provider_policy, lookup_max_attempts=policy.max_attempts))
         for name in ("planned", "processed", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh"):
             _safe_echo(f"{name}: {getattr(report, name)}")
         _safe_echo("matching_mutations: 0")
@@ -1192,7 +1192,7 @@ def catalogue_match_external_recording_fetch_candidates(
             if not yes and not typer.confirm("Fetch MusicBrainz Recording evidence for complete selected candidate bundles?"):
                 raise typer.Abort()
             with httpx.Client(timeout=policy.request_timeout_seconds, verify=True, follow_redirects=False, trust_env=False) as client:
-                report = service.fetch(plan, MusicBrainzResearchProvider(client=client, policy=provider_policy))
+                report = service.fetch(plan, MusicBrainzResearchProvider(client=client, policy=provider_policy, lookup_max_attempts=policy.max_attempts))
         for name in ("planned_candidates", "processed_candidates", "planned_lookup_identities", "processed_lookup_identities", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh", "skipped_candidate_not_completable"):
             _safe_echo(f"{name}: {getattr(report, name)}")
         _safe_echo("matching_mutations: 0")

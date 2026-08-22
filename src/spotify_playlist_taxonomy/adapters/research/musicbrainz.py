@@ -7,6 +7,9 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from threading import Lock
+import time
+from typing import Callable
 
 import httpx
 
@@ -46,6 +49,27 @@ class MusicBrainzRecordingLookupResult:
     failure_category: str | None = None
 
 
+class MusicBrainzRequestGate:
+    """Serial, monotonic request pacing shared by MusicBrainz adapter instances."""
+
+    def __init__(self, *, monotonic: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep) -> None:
+        self._monotonic, self._sleep = monotonic, sleep
+        self._lock = Lock()
+        self._last_request_started: float | None = None
+
+    def wait_for_turn(self, minimum_interval_seconds: float) -> None:
+        with self._lock:
+            now = self._monotonic()
+            if self._last_request_started is not None:
+                remaining = minimum_interval_seconds - (now - self._last_request_started)
+                if remaining > 0:
+                    self._sleep(remaining)
+            self._last_request_started = self._monotonic()
+
+
+_PROCESS_MUSICBRAINZ_REQUEST_GATE = MusicBrainzRequestGate()
+
+
 def _retry_after(response: httpx.Response) -> float | None:
     value = response.headers.get("Retry-After")
     try:
@@ -55,11 +79,18 @@ def _retry_after(response: httpx.Response) -> float | None:
 
 
 class MusicBrainzResearchProvider:
-    def __init__(self, *, client: httpx.Client, policy: ResearchProviderPolicy):
+    def __init__(self, *, client: httpx.Client, policy: ResearchProviderPolicy,
+                 request_gate: MusicBrainzRequestGate | None = None,
+                 lookup_max_attempts: int = 1,
+                 sleep: Callable[[float], None] = time.sleep):
         if policy.provider_id != "musicbrainz":
             raise ValueError("MusicBrainz adapter requires musicbrainz policy")
         self.client = client
         self.policy = policy
+        if not 1 <= lookup_max_attempts <= 3:
+            raise ValueError("lookup_max_attempts must be between 1 and 3")
+        self._request_gate = request_gate or _PROCESS_MUSICBRAINZ_REQUEST_GATE
+        self._lookup_max_attempts, self._sleep = lookup_max_attempts, sleep
         self._descriptor = ProviderDescriptor(
             "musicbrainz", policy.adapter_version, "research-provider.v1",
             (
@@ -132,7 +163,13 @@ class MusicBrainzResearchProvider:
         path = f"{self.policy.api_url.rstrip('/')}/isrc/{normalized_isrc}"
         params = {"fmt": "json"}
         fingerprint = _fingerprint({"url": path, "params": params})
-        response = self._request(path, params)
+        response: httpx.Response | ResearchResult
+        for attempt_number in range(1, self._lookup_max_attempts + 1):
+            response = self._request(path, params)
+            if not isinstance(response, ResearchResult) or response.status is not ProviderOutcomeStatus.TRANSIENT_ERROR:
+                break
+            if attempt_number < self._lookup_max_attempts:
+                self._sleep(response.retry_after_seconds if response.retry_after_seconds is not None else float(2 ** (attempt_number - 1)))
         if isinstance(response, ResearchResult):
             category = response.error_category
             if response.status is ProviderOutcomeStatus.NO_RESULT:
@@ -154,6 +191,7 @@ class MusicBrainzResearchProvider:
         return MusicBrainzRecordingLookupResult(normalized_isrc, tuple(sorted(values)), fingerprint, self.policy.adapter_version, _now())
 
     def _request(self, url: str, params: dict[str, str]) -> httpx.Response | ResearchResult:
+        self._request_gate.wait_for_turn(self.policy.minimum_interval_seconds)
         try:
             response = self.client.get(url, params=params,
                                        headers={"User-Agent": self.policy.user_agent,

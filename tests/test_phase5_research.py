@@ -357,15 +357,17 @@ class Phase5ResearchTests(unittest.TestCase):
              "sourced_fact", "legacy value", None, None, utc_now()),
         )
         connection.commit()
-        self.assertEqual(4, current_schema_version(connection))
-        self.assertEqual(13, apply_migrations(connection))
-        row = connection.execute(
-            "SELECT normalized_value, provider_id, evidence_state FROM research_evidence"
-        ).fetchone()
-        self.assertEqual(("legacy value", None, "active"), tuple(row))
-        assert_integrity(connection)
-        self.assertEqual(0, connection.execute("PRAGMA foreign_key_check").fetchall().__len__())
-        connection.close()
+        try:
+            self.assertEqual(4, current_schema_version(connection))
+            self.assertEqual(17, apply_migrations(connection))
+            row = connection.execute(
+                "SELECT normalized_value, provider_id, evidence_state FROM research_evidence"
+            ).fetchone()
+            self.assertEqual(("legacy value", None, "active"), tuple(row))
+            assert_integrity(connection)
+            self.assertEqual(0, connection.execute("PRAGMA foreign_key_check").fetchall().__len__())
+        finally:
+            connection.close()
 
 
 if __name__ == "__main__":

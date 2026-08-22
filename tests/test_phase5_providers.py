@@ -11,6 +11,7 @@ import _bootstrap  # noqa: F401
 from spotify_playlist_taxonomy.adapters.research import (
     MusicBrainzResearchProvider, WikidataResearchProvider,
 )
+from spotify_playlist_taxonomy.adapters.research.musicbrainz import MusicBrainzRequestGate
 from spotify_playlist_taxonomy.config import (
     ResearchProviderPolicy, load_research_policy_document,
 )
@@ -345,7 +346,85 @@ class ProviderAdapterTests(unittest.TestCase):
         self.assertEqual((MBID, other), result.recording_ids)
         self.assertIsNone(result.failure_category)
         self.assertEqual("/ws/2/isrc/USRC17607839", requests[0].url.path)
+        self.assertEqual(self.musicbrainz_policy.user_agent, requests[0].headers["User-Agent"])
         self.assertNotIn("recordings", repr(result))
+
+    def test_musicbrainz_isrc_request_gate_paces_shared_provider_instances_without_real_sleep(self) -> None:
+        class Clock:
+            def __init__(self) -> None: self.value = 0.0; self.sleeps: list[float] = []
+            def monotonic(self) -> float: return self.value
+            def sleep(self, seconds: float) -> None: self.sleeps.append(seconds); self.value += seconds
+        clock = Clock(); gate = MusicBrainzRequestGate(monotonic=clock.monotonic, sleep=clock.sleep)
+        request_times: list[float] = []
+        def handler(_: httpx.Request) -> httpx.Response:
+            request_times.append(clock.value); return httpx.Response(200, json={"recordings": []})
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            first = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy, request_gate=gate)
+            second = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy, request_gate=gate)
+            first.lookup_recordings_by_isrc("USRC17607839")
+            second.lookup_recordings_by_isrc("USRC17607839")
+            clock.value += 1.0
+            first.lookup_recordings_by_isrc("USRC17607839")
+        self.assertEqual([0.0, 1.0, 2.0], request_times)
+        self.assertEqual([1.0], clock.sleeps)
+
+    def test_musicbrainz_isrc_retries_only_transient_results_with_pacing_and_backoff(self) -> None:
+        class Clock:
+            def __init__(self) -> None: self.value = 0.0; self.sleeps: list[float] = []
+            def monotonic(self) -> float: return self.value
+            def sleep(self, seconds: float) -> None: self.sleeps.append(seconds); self.value += seconds
+        def lookup(responses: list[object]) -> tuple[object, list[httpx.Request], Clock]:
+            clock = Clock(); gate = MusicBrainzRequestGate(monotonic=clock.monotonic, sleep=clock.sleep); requests: list[httpx.Request] = []
+            def handler(value: httpx.Request) -> httpx.Response:
+                requests.append(value); outcome = responses.pop(0)
+                if isinstance(outcome, Exception): raise outcome
+                return outcome  # type: ignore[return-value]
+            with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+                result = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy, request_gate=gate, lookup_max_attempts=3, sleep=clock.sleep).lookup_recordings_by_isrc("USRC17607839")
+            return result, requests, clock
+        for response in (httpx.Response(503), httpx.Response(429)):
+            with self.subTest(status=response.status_code):
+                result, requests, clock = lookup([response, httpx.Response(200, json={"recordings": [{"id": MBID}]})])
+                self.assertEqual((MBID,), result.recording_ids); self.assertEqual(2, len(requests)); self.assertEqual([1.0], clock.sleeps)
+        result, requests, _ = lookup([httpx.Response(503), httpx.Response(503), httpx.Response(503)])
+        self.assertEqual(((), "provider_temporarily_unavailable", 3), (result.recording_ids, result.failure_category, len(requests)))
+        result, requests, _ = lookup([httpx.ReadTimeout("synthetic"), httpx.Response(200, json={"recordings": []})])
+        self.assertEqual(((), None, 2), (result.recording_ids, result.failure_category, len(requests)))
+        result, requests, _ = lookup([httpx.ConnectError("synthetic"), httpx.Response(200, json={"recordings": []})])
+        self.assertEqual(((), None, 2), (result.recording_ids, result.failure_category, len(requests)))
+        result, requests, _ = lookup([httpx.Response(200, json={"recordings": []}), httpx.Response(200, json={"recordings": [{"id": MBID}]})])
+        self.assertEqual(((), None, 1), (result.recording_ids, result.failure_category, len(requests)))
+        result, requests, _ = lookup([httpx.Response(200, json={"recordings": [{"id": "invalid"}]})])
+        self.assertEqual(("invalid_response", 1), (result.failure_category, len(requests)))
+        invalid_calls = 0
+        def invalid_handler(_: httpx.Request) -> httpx.Response:
+            nonlocal invalid_calls; invalid_calls += 1; return httpx.Response(200)
+        with httpx.Client(transport=httpx.MockTransport(invalid_handler)) as client:
+            provider = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy, request_gate=MusicBrainzRequestGate(monotonic=lambda: 0.0, sleep=lambda _: None))
+            with self.assertRaises(ValueError): provider.lookup_recordings_by_isrc("invalid")
+        self.assertEqual(0, invalid_calls)
+
+    def test_musicbrainz_isrc_retry_after_and_phase5_research_do_not_multiply_retries(self) -> None:
+        class Clock:
+            def __init__(self) -> None: self.value = 0.0; self.sleeps: list[float] = []
+            def monotonic(self) -> float: return self.value
+            def sleep(self, seconds: float) -> None: self.sleeps.append(seconds); self.value += seconds
+        for retry_after, expected in (("0.25", [0.25, 0.75]), ("2", [2.0])):
+            with self.subTest(retry_after=retry_after):
+                clock = Clock(); gate = MusicBrainzRequestGate(monotonic=clock.monotonic, sleep=clock.sleep); calls = 0
+                def handler(_: httpx.Request) -> httpx.Response:
+                    nonlocal calls; calls += 1
+                    return httpx.Response(503, headers={"Retry-After": retry_after}) if calls == 1 else httpx.Response(200, json={"recordings": []})
+                with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+                    MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy, request_gate=gate, lookup_max_attempts=3, sleep=clock.sleep).lookup_recordings_by_isrc("USRC17607839")
+                self.assertEqual(expected, clock.sleeps)
+        calls = 0
+        def phase5_handler(_: httpx.Request) -> httpx.Response:
+            nonlocal calls; calls += 1; return httpx.Response(503)
+        clock = Clock()
+        with httpx.Client(transport=httpx.MockTransport(phase5_handler)) as client:
+            result = MusicBrainzResearchProvider(client=client, policy=self.musicbrainz_policy, request_gate=MusicBrainzRequestGate(monotonic=clock.monotonic, sleep=clock.sleep), lookup_max_attempts=3, sleep=clock.sleep).research(request())
+        self.assertEqual((ProviderOutcomeStatus.TRANSIENT_ERROR, 1), (result.status, calls))
 
     def test_musicbrainz_isrc_lookup_fails_closed_for_malformed_or_provider_failure(self) -> None:
         with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"recordings": [{"id": "not-a-mbid"}]}))) as client:
