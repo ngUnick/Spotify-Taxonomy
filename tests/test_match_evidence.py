@@ -480,6 +480,33 @@ class MatchEvidenceTests(unittest.TestCase):
         self.assertEqual("partial-resolution", item.primary_outcome)
         self.assertTrue(item.has_ambiguous)
 
+    def test_external_recording_comparison_context_reuses_local_evidence_for_all_members(self) -> None:
+        store = IdentityExternalEvidenceStore(self.connection)
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        recording_a = "abcdefab-cdef-cdef-cdef-abcdefabcdef"; recording_b = "11111111-2222-3333-4444-555555555555"
+        for identity_id, recording_id in (("identity.unresolved", recording_a), ("identity.linked.a", recording_a), ("identity.linked.b", recording_b)):
+            store.upsert(IdentityExternalEntityEvidence("external.context." + identity_id, identity_id, external_id=recording_id, lookup_state="resolved", **base))
+        before = self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall()
+        item = ExternalRecordingComparisonService(self.store, self.binding.binding_id).compare("all-resolved-disagree", 1)[0]
+        self.assertEqual(("all-resolved-disagree", "identity.unresolved", "Synthetic", ("Artist",), "live", 100000, "USRC17607839"), (item.primary_outcome, item.candidate.identity_id, item.candidate.title, item.candidate.artists, item.candidate.effective_version_cue, item.candidate.duration_ms, item.candidate.isrc))
+        self.assertEqual(("identity.linked.a", "identity.linked.b"), tuple(member.identity_id for member in item.comparisons))
+        self.assertEqual((0, "same", "compatible", "consistent", "same"), (item.comparisons[0].duration_delta_ms, item.comparisons[0].isrc_relationship, item.comparisons[0].version_relationship, item.comparisons[0].comparison_consistency, item.comparisons[0].external_recording_relationship))
+        self.assertEqual((6001, "different", "conflict", "inconsistent", "different"), (item.comparisons[1].duration_delta_ms, item.comparisons[1].isrc_relationship, item.comparisons[1].version_relationship, item.comparisons[1].comparison_consistency, item.comparisons[1].external_recording_relationship))
+        self.assertEqual((3, 2, True), (item.resolved_identity_count, item.distinct_resolved_recording_count, item.comparison_consistency.comparison_inconsistent))
+        store.upsert(IdentityExternalEntityEvidence("external.context.same", "identity.linked.b", external_id=recording_a, lookup_state="resolved", **base))
+        same = ExternalRecordingComparisonService(self.store, self.binding.binding_id).compare("all-resolved-same-recording", 1)[0]
+        self.assertEqual("same", same.comparisons[1].external_recording_relationship)
+        store.upsert(IdentityExternalEntityEvidence("external.context.not-found", "identity.linked.b", external_id=None, lookup_state="not_found", **base))
+        partial = ExternalRecordingComparisonService(self.store, self.binding.binding_id).compare("partial-resolution", 1)[0]
+        self.assertEqual((3, "fresh_not_found", "unavailable"), (len(partial.members), partial.comparisons[1].evidence_state, partial.comparisons[1].external_recording_relationship))
+        self.connection.execute("UPDATE track_identities SET version_label=NULL, title='Synthetic' WHERE identity_id='identity.linked.b'"); self.connection.commit()
+        unknown_version = ExternalRecordingComparisonService(self.store, self.binding.binding_id).compare("partial-resolution", 1)[0]
+        self.assertEqual("unknown", unknown_version.comparisons[1].version_relationship)
+        self.connection.execute("UPDATE track_identities SET isrc=NULL WHERE identity_id='identity.linked.b'"); self.connection.commit()
+        missing = ExternalRecordingComparisonService(self.store, self.binding.binding_id).compare("partial-resolution", 1)[0]
+        self.assertEqual("missing", missing.comparisons[1].isrc_relationship)
+        self.assertEqual(before, self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates ORDER BY candidate_id").fetchall())
+
     def test_external_recording_status_and_compare_cli_are_local_and_bounded(self) -> None:
         database = Path(self.temp.name) / "app.db"; data_dir = Path(self.temp.name) / "external-status-runtime"; (data_dir / "state").mkdir(parents=True)
         self.connection.close(); database.replace(data_dir / "state" / "app.db")
@@ -487,6 +514,22 @@ class MatchEvidenceTests(unittest.TestCase):
         compare = CliRunner().invoke(app, ["catalogue", "match", "external-recording", "compare", "--category", "no-resolution", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)])
         self.assertEqual(0, status.exit_code, status.output); self.assertEqual(0, compare.exit_code, compare.output)
         self.assertIn("current_candidates: 1", status.output); self.assertEqual(1, sum(line.startswith("candidate_id:") for line in compare.output.splitlines()))
+
+    def test_external_recording_compare_cli_renders_context_without_writes(self) -> None:
+        base = dict(provider="musicbrainz", entity_type="recording", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        for identity_id, recording_id in (("identity.unresolved", "abcdefab-cdef-cdef-cdef-abcdefabcdef"), ("identity.linked.a", "abcdefab-cdef-cdef-cdef-abcdefabcdef"), ("identity.linked.b", "11111111-2222-3333-4444-555555555555")):
+            evidence.upsert(IdentityExternalEntityEvidence("external.cli." + identity_id, identity_id, external_id=recording_id, lookup_state="resolved", **base))
+        database = Path(self.temp.name) / "app.db"; data_dir = Path(self.temp.name) / "external-context-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        before_connection = connect_database(data_dir / "state" / "app.db")
+        before = before_connection.execute("SELECT COUNT(*) FROM identity_external_entity_evidence").fetchone()[0]
+        before_connection.close()
+        result = CliRunner().invoke(app, ["catalogue", "match", "external-recording", "compare", "--category", "all-resolved-disagree", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)])
+        after_connection = connect_database(data_dir / "state" / "app.db"); after = after_connection.execute("SELECT COUNT(*) FROM identity_external_entity_evidence").fetchone()[0]; after_connection.close()
+        self.assertEqual(0, result.exit_code, result.output); self.assertEqual(before, after)
+        for field in ("candidate_identity_id:", "candidate_title:", "candidate_artists:", "candidate_effective_version_cue:", "comparison_1_identity_id:", "comparison_1_duration_delta_ms:", "comparison_1_isrc_relationship:", "comparison_1_version_relationship:", "comparison_1_comparison_consistency:", "comparison_1_external_recording_relationship:"):
+            self.assertIn(field, result.output)
 
     def test_external_recording_candidate_fetch_plan_is_complete_prioritized_and_fail_closed(self) -> None:
         service = ExternalRecordingCandidateFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)

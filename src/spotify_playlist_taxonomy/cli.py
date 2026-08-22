@@ -1268,8 +1268,34 @@ def catalogue_match_external_recording_compare(
             if binding is None: raise Phase3StateError("an active Spotify account binding is required")
             rows = ExternalRecordingComparisonService(store, binding.binding_id).compare(category, limit)
         for item in rows:
-            _safe_echo(f"candidate_id: {item.candidate_id}\nidentity_id: {item.identity_id}\ncanonical_id: {item.canonical_track_id}\nprimary_outcome: {item.primary_outcome}\nmember_count: {len(item.members)}\nresolved_identity_count: {item.resolved_identity_count}\ndistinct_resolved_recording_count: {item.distinct_resolved_recording_count}")
-            for index, member in enumerate(item.members, 1): _safe_echo(f"member_{index}_identity_id: {member.identity_id}\nmember_{index}_evidence_state: {member.evidence_state}\nmember_{index}_external_recording_id: {member.external_recording_id or '-'}")
+            candidate = item.candidate
+            _safe_echo(
+                f"candidate_id: {item.candidate_id}\ncanonical_id: {item.canonical_track_id}\nprimary_outcome: {item.primary_outcome}\n"
+                f"member_count: {len(item.members)}\nresolved_identity_count: {item.resolved_identity_count}\n"
+                f"distinct_resolved_recording_count: {item.distinct_resolved_recording_count}\n"
+                f"candidate_identity_id: {candidate.identity_id}\ncandidate_title: {candidate.title or '-'}\n"
+                f"candidate_artists: {', '.join(candidate.artists) or '-'}\n"
+                f"candidate_effective_version_cue: {candidate.effective_version_cue or '-'}\n"
+                f"candidate_duration_ms: {candidate.duration_ms if candidate.duration_ms is not None else '-'}\n"
+                f"candidate_isrc: {candidate.isrc or '-'}\ncandidate_evidence_state: {candidate.evidence_state}\n"
+                f"candidate_external_recording_id: {candidate.external_recording_id or '-'}\n"
+                f"comparison_consistency: {'inconsistent' if item.comparison_consistency.comparison_inconsistent else 'consistent'}"
+            )
+            for index, comparison in enumerate(item.comparisons, 1):
+                _safe_echo(
+                    f"comparison_{index}_identity_id: {comparison.identity_id}\ncomparison_{index}_title: {comparison.title or '-'}\n"
+                    f"comparison_{index}_artists: {', '.join(comparison.artists) or '-'}\n"
+                    f"comparison_{index}_effective_version_cue: {comparison.effective_version_cue or '-'}\n"
+                    f"comparison_{index}_duration_ms: {comparison.duration_ms if comparison.duration_ms is not None else '-'}\n"
+                    f"comparison_{index}_isrc: {comparison.isrc or '-'}\n"
+                    f"comparison_{index}_evidence_state: {comparison.evidence_state}\n"
+                    f"comparison_{index}_external_recording_id: {comparison.external_recording_id or '-'}\n"
+                    f"comparison_{index}_duration_delta_ms: {comparison.duration_delta_ms if comparison.duration_delta_ms is not None else '-'}\n"
+                    f"comparison_{index}_isrc_relationship: {comparison.isrc_relationship}\n"
+                    f"comparison_{index}_version_relationship: {comparison.version_relationship}\n"
+                    f"comparison_{index}_comparison_consistency: {comparison.comparison_consistency}\n"
+                    f"comparison_{index}_external_recording_relationship: {comparison.external_recording_relationship}"
+                )
     except (OSError, ValueError, ValidationError, PersistenceError, Phase3StateError) as error: _fail(error)
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
@@ -14,7 +14,8 @@ from spotify_playlist_taxonomy.persistence.identity_external_evidence import (
     IdentityExternalEntityEvidence,
     IdentityExternalEvidenceStore,
 )
-from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
+from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store, _effective_version_cue, _versions_conflict
+from spotify_playlist_taxonomy.workflows.deterministic_match import ComparisonConsistency, evaluate_comparison_consistency
 from spotify_playlist_taxonomy.workflows.match_topology import UnresolvedMatchTopologyService
 
 
@@ -236,23 +237,42 @@ EXTERNAL_RECORDING_COMPARISON_CATEGORIES = (
 @dataclass(frozen=True, slots=True)
 class ExternalRecordingComparisonMember:
     identity_id: str
+    title: str
+    artists: tuple[str, ...]
+    effective_version_cue: str | None
+    duration_ms: int | None
+    isrc: str | None
     evidence_state: str
     external_recording_id: str | None
+    duration_delta_ms: int | None = None
+    isrc_relationship: str | None = None
+    version_relationship: str | None = None
+    comparison_consistency: str | None = None
+    external_recording_relationship: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ExternalRecordingCandidateComparison:
     candidate_id: str
-    identity_id: str
     canonical_track_id: str
     primary_outcome: str
-    members: tuple[ExternalRecordingComparisonMember, ...]
+    candidate: ExternalRecordingComparisonMember
+    comparisons: tuple[ExternalRecordingComparisonMember, ...]
+    comparison_consistency: ComparisonConsistency
     has_ambiguous: bool
     has_not_found: bool
     has_insufficient_input: bool
     has_lookup_failed: bool
     has_stale: bool
     has_no_evidence: bool
+
+    @property
+    def identity_id(self) -> str:
+        return self.candidate.identity_id
+
+    @property
+    def members(self) -> tuple[ExternalRecordingComparisonMember, ...]:
+        return (self.candidate, *self.comparisons)
 
     @property
     def resolved_identity_count(self) -> int:
@@ -297,10 +317,26 @@ class ExternalRecordingComparisonService:
         attr = category.replace("-", "_")
         return tuple(item for item in self.status().comparisons if item.primary_outcome == category or bool(getattr(item, attr, False)))[:limit]
 
-    @staticmethod
-    def _comparison(topology, targets: dict[str, ExternalRecordingTarget]) -> ExternalRecordingCandidateComparison:
+    def _comparison(self, topology, targets: dict[str, ExternalRecordingTarget]) -> ExternalRecordingCandidateComparison:
         ids = (topology.identity_id, *topology.comparison_identity_ids)
-        members = tuple(ExternalRecordingComparisonMember(item, targets[item].evidence_state, targets[item].external_recording_id) for item in ids)
+        contexts = self._identity_contexts(ids)
+        members = tuple(
+            ExternalRecordingComparisonMember(
+                item, contexts[item][0], contexts[item][1], contexts[item][2], contexts[item][3], contexts[item][4],
+                targets[item].evidence_state, targets[item].external_recording_id,
+            )
+            for item in ids
+        )
+        candidate = members[0]
+        comparisons = tuple(self._pairwise_member(candidate, item) for item in members[1:])
+        consistency = evaluate_comparison_consistency(tuple(
+            (
+                candidate.isrc is not None and item.isrc is not None and candidate.isrc == item.isrc,
+                item.duration_delta_ms,
+                item.version_relationship == "conflict",
+            )
+            for item in comparisons
+        ))
         resolved = tuple(item.external_recording_id for item in members if item.evidence_state == "fresh_resolved")
         if len(resolved) == len(members) and len(set(resolved)) == 1:
             outcome = "all-resolved-same-recording"
@@ -312,10 +348,50 @@ class ExternalRecordingComparisonService:
             outcome = "no-resolution"
         states = {item.evidence_state for item in members}
         return ExternalRecordingCandidateComparison(
-            topology.candidate_id, topology.identity_id, topology.canonical_track_id, outcome, members,
+            topology.candidate_id, topology.canonical_track_id, outcome, candidate, comparisons, consistency,
             "fresh_ambiguous" in states, "fresh_not_found" in states,
             "fresh_insufficient_input" in states, "fresh_lookup_failed" in states,
             "stale" in states, "no_evidence" in states,
+        )
+
+    def _identity_contexts(self, identity_ids: tuple[str, ...]) -> dict[str, tuple[str, tuple[str, ...], str | None, int | None, str | None]]:
+        placeholders = ",".join("?" for _ in identity_ids)
+        rows = self._store.connection.execute(
+            f"SELECT identity_id, title, version_label, duration_ms, isrc FROM track_identities WHERE identity_id IN ({placeholders})",
+            identity_ids,
+        ).fetchall()
+        artists = {
+            identity_id: tuple(row[0] for row in self._store.connection.execute(
+                "SELECT artist_name FROM track_identity_artists WHERE identity_id = ? ORDER BY position", (identity_id,),
+            ))
+            for identity_id in identity_ids
+        }
+        return {
+            row["identity_id"]: (
+                row["title"], artists[row["identity_id"]], _effective_version_cue(row["version_label"], row["title"]),
+                row["duration_ms"], row["isrc"],
+            )
+            for row in rows
+        }
+
+    @staticmethod
+    def _pairwise_member(candidate: ExternalRecordingComparisonMember, comparison: ExternalRecordingComparisonMember) -> ExternalRecordingComparisonMember:
+        duration_delta = None if candidate.duration_ms is None or comparison.duration_ms is None else abs(candidate.duration_ms - comparison.duration_ms)
+        isrc_relationship = "missing" if candidate.isrc is None or comparison.isrc is None else "same" if candidate.isrc == comparison.isrc else "different"
+        version_relationship = "unknown" if candidate.effective_version_cue is None or comparison.effective_version_cue is None else "conflict" if _versions_conflict(candidate.effective_version_cue, comparison.effective_version_cue) else "compatible"
+        pair = evaluate_comparison_consistency(((isrc_relationship == "same", duration_delta, version_relationship == "conflict"),))
+        external_relationship = (
+            "same" if candidate.external_recording_id == comparison.external_recording_id else "different"
+            if candidate.evidence_state == comparison.evidence_state == "fresh_resolved" and candidate.external_recording_id and comparison.external_recording_id
+            else "unavailable"
+        )
+        return replace(
+            comparison,
+            duration_delta_ms=duration_delta,
+            isrc_relationship=isrc_relationship,
+            version_relationship=version_relationship,
+            comparison_consistency="consistent" if not (pair.any_isrc_mismatch or pair.any_duration_over_threshold or pair.any_version_conflict) else "inconsistent",
+            external_recording_relationship=external_relationship,
         )
 
 
