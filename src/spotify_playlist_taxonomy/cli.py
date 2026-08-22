@@ -1152,6 +1152,42 @@ def catalogue_match_external_recording_fetch(
         _fail(error)
 
 
+@catalogue_match_external_recording_app.command("retry-failed")
+def catalogue_match_external_recording_retry_failed(
+    limit: int = typer.Option(..., "--limit", min=1, max=100),
+    yes: bool = typer.Option(False, "--yes"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Explicitly retry only fresh failed MusicBrainz recording lookups."""
+    try:
+        config_path = config_path.resolve()
+        with _phase3_store(config_path, data_dir) as (config, _, store):
+            if current_schema_version(store.connection) < 17:
+                raise PersistenceError("database requires migration 17; run 'db init'")
+            binding = store.active_account()
+            if binding is None:
+                raise Phase3StateError("an active Spotify account binding is required")
+            policy = _load_research_policy(config_path, config)
+            provider_policy = next(item for item in policy.providers if item.provider_id == "musicbrainz" and item.enabled)
+            service = ExternalRecordingEvidenceFetchService(
+                store, binding.binding_id, positive_ttl_hours=policy.positive_ttl_hours,
+                negative_ttl_hours=policy.negative_ttl_hours, ambiguous_ttl_hours=policy.ambiguous_ttl_hours,
+            )
+            selected = service.failed_retry_plan(limit)
+            eligible = sum(item.evidence_state == "fresh_lookup_failed" for item in ExternalRecordingTargetProjectionService(store, binding.binding_id).preview().targets)
+            _safe_echo(f"eligible_failed_targets: {eligible}\nselected_targets: {len(selected)}\nprovider: musicbrainz\nentity_type: recording\nlookup_method: isrc\nnetwork_access: yes\nmatching_mutation: no\nrecovery_mode: explicit_lookup_failed_retry")
+            if not yes and not typer.confirm("Retry fresh failed MusicBrainz Recording evidence for selected identities?"):
+                raise typer.Abort()
+            with httpx.Client(timeout=policy.request_timeout_seconds, verify=True, follow_redirects=False, trust_env=False) as client:
+                report = service.retry_failed(limit, MusicBrainzResearchProvider(client=client, policy=provider_policy, lookup_max_attempts=policy.max_attempts))
+        for name in ("planned", "processed", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_not_failed"):
+            _safe_echo(f"{name}: {getattr(report, name)}")
+        _safe_echo("matching_mutations: 0")
+    except (OSError, StopIteration, ValueError, ValidationError, PersistenceError, Phase3StateError) as error:
+        _fail(error)
+
+
 @catalogue_match_external_recording_app.command("fetch-candidates")
 def catalogue_match_external_recording_fetch_candidates(
     candidate_limit: int = typer.Option(..., "--candidate-limit", min=1, max=20),

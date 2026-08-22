@@ -553,6 +553,83 @@ class MatchEvidenceTests(unittest.TestCase):
         self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "fetch-candidates", "--candidate-limit", "21", "--identity-limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
         self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "fetch-candidates", "--candidate-limit", "1", "--identity-limit", "101", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
 
+    def test_external_recording_failed_retry_plan_is_bounded_deterministic_and_ordinary_fetch_remains_closed(self) -> None:
+        service = ExternalRecordingEvidenceFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        base = dict(provider="musicbrainz", entity_type="recording", external_id=None, lookup_state="lookup_failed", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        for identity_id in ("identity.unresolved", "identity.linked.b"):
+            evidence.upsert(IdentityExternalEntityEvidence("external." + identity_id, identity_id, **base))
+        for state in ("resolved", "ambiguous", "not_found", "insufficient_input"):
+            evidence.upsert(IdentityExternalEntityEvidence(
+                "external.excluded." + state,
+                "identity.linked.a",
+                **(base | {"external_id": "abcdefab-cdef-cdef-cdef-abcdefabcdef" if state == "resolved" else None, "lookup_state": state}),
+            ))
+            self.assertNotIn("identity.linked.a", {item.identity_id for item in service.failed_retry_plan(100)})
+        evidence.upsert(IdentityExternalEntityEvidence("external.excluded.stale", "identity.linked.a", **(base | {"fresh_until": "2000-01-01T00:00:00Z"})))
+        self.assertNotIn("identity.linked.a", {item.identity_id for item in service.failed_retry_plan(100)})
+        self.connection.execute("DELETE FROM identity_external_entity_evidence WHERE identity_id='identity.linked.a'")
+        evidence.upsert(IdentityExternalEntityEvidence("external.excluded.provider", "identity.linked.a", "wikidata", "recording", None, "lookup_failed", "isrc", "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z", "2099-01-01T00:00:00Z", None, None))
+        self.assertNotIn("identity.linked.a", {item.identity_id for item in service.failed_retry_plan(100)})
+        self.assertEqual(("identity.linked.b", "identity.unresolved"), tuple(item.identity_id for item in service.failed_retry_plan(2)))
+        self.assertEqual(("identity.linked.b",), tuple(item.identity_id for item in service.failed_retry_plan(1)))
+        self.assertTrue({"identity.unresolved", "identity.linked.b"}.isdisjoint({item.identity_id for item in service.plan(100)}))
+        targets = {item.identity_id: item for item in ExternalRecordingTargetProjectionService(self.store, self.binding.binding_id).preview().targets}
+        self.assertFalse(targets["identity.linked.b"].requires_lookup)
+        self.assertTrue(ExternalRecordingCandidateFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1).plan(1, 3).blocked_candidates > 0)
+
+    def test_external_recording_failed_retry_reuses_fetch_persistence_and_rechecks_state(self) -> None:
+        service = ExternalRecordingEvidenceFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        base = dict(provider="musicbrainz", entity_type="recording", external_id=None, lookup_state="lookup_failed", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        evidence = IdentityExternalEvidenceStore(self.connection); evidence.upsert(IdentityExternalEntityEvidence("external.failed", "identity.unresolved", **base))
+        planned = service.failed_retry_plan(1); candidates = self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates").fetchall()
+        class Lookup:
+            calls = 0
+            def lookup_recordings_by_isrc(self, isrc: str) -> MusicBrainzRecordingLookupResult:
+                self.calls += 1; return MusicBrainzRecordingLookupResult(isrc, ("abcdefab-cdef-cdef-cdef-abcdefabcdef",), "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z")
+        lookup = Lookup(); report = service.retry_failed_targets(planned, lookup)
+        self.assertEqual((1, 1, 1, 0), (report.planned, report.processed, report.resolved, report.skipped_not_failed)); self.assertEqual(1, lookup.calls)
+        self.assertEqual("resolved", IdentityExternalEvidenceStore(self.connection).for_identities(("identity.unresolved",))[0].lookup_state)
+        self.assertEqual(candidates, self.connection.execute("SELECT candidate_id, state FROM canonical_match_candidates").fetchall())
+        evidence.upsert(IdentityExternalEntityEvidence("external.failed.again", "identity.unresolved", **base)); stale_plan = service.failed_retry_plan(1)
+        evidence.upsert(IdentityExternalEntityEvidence("external.changed", "identity.unresolved", **(base | {"lookup_state": "not_found"})))
+        skipped = service.retry_failed_targets(stale_plan, lookup)
+        self.assertEqual((0, 1), (skipped.processed, skipped.skipped_not_failed)); self.assertEqual(1, lookup.calls)
+
+    def test_external_recording_failed_retry_handles_terminal_outcomes_missing_input_and_topology_change(self) -> None:
+        service = ExternalRecordingEvidenceFetchService(self.store, self.binding.binding_id, positive_ttl_hours=1, negative_ttl_hours=1, ambiguous_ttl_hours=1)
+        base = dict(provider="musicbrainz", entity_type="recording", external_id=None, lookup_state="lookup_failed", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        evidence = IdentityExternalEvidenceStore(self.connection)
+        for recordings, expected in (((), "not_found"), (("abcdefab-cdef-cdef-cdef-abcdefabcdef", "11111111-2222-3333-4444-555555555555"), "ambiguous")):
+            evidence.upsert(IdentityExternalEntityEvidence("external.retry." + expected, "identity.unresolved", **base))
+            class Lookup:
+                def lookup_recordings_by_isrc(self, isrc: str) -> MusicBrainzRecordingLookupResult: return MusicBrainzRecordingLookupResult(isrc, recordings, "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z")
+            self.assertEqual(1, getattr(service.retry_failed(1, Lookup()), expected))
+        evidence.upsert(IdentityExternalEntityEvidence("external.retry.input", "identity.unresolved", **base)); self.connection.execute("UPDATE track_identities SET isrc=NULL WHERE identity_id='identity.unresolved'"); self.connection.commit()
+        class NoNetwork:
+            def lookup_recordings_by_isrc(self, isrc: str): raise AssertionError("missing ISRC must not call provider")
+        self.assertEqual(1, service.retry_failed(1, NoNetwork()).insufficient_input)
+        self.connection.execute("UPDATE track_identities SET isrc='USRC17607839' WHERE identity_id='identity.unresolved'"); evidence.upsert(IdentityExternalEntityEvidence("external.retry.topology", "identity.unresolved", **base)); planned = service.failed_retry_plan(1)
+        self.connection.execute("DELETE FROM canonical_match_candidates WHERE candidate_id='candidate.synthetic'"); self.connection.commit()
+        topology_skipped = service.retry_failed_targets(planned, NoNetwork())
+        self.assertEqual((0, 1), (topology_skipped.processed, topology_skipped.skipped_not_failed))
+
+    def test_external_recording_retry_failed_cli_is_confirmed_bounded_and_synthetic(self) -> None:
+        base = dict(provider="musicbrainz", entity_type="recording", external_id=None, lookup_state="lookup_failed", lookup_method="isrc", query_fingerprint="synthetic", adapter_version="synthetic.v1", retrieved_at="2026-01-01T00:00:00Z", fresh_until="2099-01-01T00:00:00Z", ambiguity_count=None, ambiguity_digest=None)
+        IdentityExternalEvidenceStore(self.connection).upsert(IdentityExternalEntityEvidence("external.failed", "identity.unresolved", **base))
+        database = Path(self.temp.name) / "app.db"; data_dir = Path(self.temp.name) / "external-retry-runtime"; (data_dir / "state").mkdir(parents=True)
+        self.connection.close(); database.replace(data_dir / "state" / "app.db")
+        args = ["catalogue", "match", "external-recording", "retry-failed", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)]
+        declined = CliRunner().invoke(app, args, input="n\n"); self.assertNotEqual(0, declined.exit_code); self.assertIn("eligible_failed_targets: 1", declined.output)
+        self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "retry-failed", "--limit", "0", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
+        self.assertNotEqual(0, CliRunner().invoke(app, ["catalogue", "match", "external-recording", "retry-failed", "--limit", "101", "--config", str(CONFIG), "--data-dir", str(data_dir)]).exit_code)
+        class FakeProvider:
+            def __init__(self, **_: object) -> None: pass
+            def lookup_recordings_by_isrc(self, isrc: str) -> MusicBrainzRecordingLookupResult:
+                return MusicBrainzRecordingLookupResult(isrc, (), "synthetic", "synthetic.v1", "2026-01-01T00:00:00Z")
+        with patch("spotify_playlist_taxonomy.cli.MusicBrainzResearchProvider", FakeProvider): accepted = CliRunner().invoke(app, [*args, "--yes"])
+        self.assertEqual(0, accepted.exit_code, accepted.output); self.assertIn("not_found: 1", accepted.output); self.assertIn("matching_mutations: 0", accepted.output)
+
     def test_grouped_evidence_cli_renders_complete_synthetic_evidence(self) -> None:
         database = Path(self.temp.name) / "app.db"
         data_dir = Path(self.temp.name) / "grouped-runtime"; (data_dir / "state").mkdir(parents=True)

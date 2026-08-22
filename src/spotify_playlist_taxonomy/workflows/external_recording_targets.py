@@ -123,6 +123,18 @@ class ExternalRecordingFetchReport:
     skipped_fresh: int
 
 
+@dataclass(frozen=True, slots=True)
+class ExternalRecordingFailedRetryReport:
+    planned: int
+    processed: int
+    resolved: int
+    ambiguous: int
+    not_found: int
+    insufficient_input: int
+    lookup_failed: int
+    skipped_not_failed: int
+
+
 class ExternalRecordingEvidenceFetchService:
     """Explicit bounded external-evidence fetch; it cannot alter matching state."""
 
@@ -136,6 +148,14 @@ class ExternalRecordingEvidenceFetchService:
             raise ValueError("limit must be between 1 and 100")
         return tuple(item for item in ExternalRecordingTargetProjectionService(self._store, self._binding_id, self._now).preview().targets if item.requires_lookup)[:limit]
 
+    def failed_retry_plan(self, limit: int) -> tuple[ExternalRecordingTarget, ...]:
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        return tuple(
+            item for item in ExternalRecordingTargetProjectionService(self._store, self._binding_id, self._now).preview().targets
+            if item.evidence_state == "fresh_lookup_failed"
+        )[:limit]
+
     def fetch(self, limit: int, lookup: RecordingLookup) -> ExternalRecordingFetchReport:
         return self.fetch_targets(self.plan(limit), lookup)
 
@@ -148,32 +168,49 @@ class ExternalRecordingEvidenceFetchService:
             if not current.get(target.identity_id, target).requires_lookup:
                 counts["skipped_fresh"] += 1
                 continue
-            isrc = self._store.connection.execute("SELECT isrc FROM track_identities WHERE identity_id = ?", (target.identity_id,)).fetchone()[0]
             counts["processed"] += 1
-            if not isinstance(isrc, str) or not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}\d{7}", isrc):
-                self._persist(evidence_store, target.identity_id, "insufficient_input", None, "local-input", self._fingerprint({"identity_id": target.identity_id, "reason": "missing_isrc"}), "local.v1", None, None)
-                counts["insufficient_input"] += 1
-                continue
-            try:
-                result = lookup.lookup_recordings_by_isrc(isrc)
-            except Exception:
-                self._persist(evidence_store, target.identity_id, "lookup_failed", None, "isrc", self._fingerprint({"isrc": isrc}), "musicbrainz-lookup.v1", None, None)
-                counts["lookup_failed"] += 1
-                continue
-            if result.failure_category is not None:
-                self._persist(evidence_store, target.identity_id, "lookup_failed", None, "isrc", result.query_fingerprint, result.adapter_version, None, None, result.retrieved_at)
-                counts["lookup_failed"] += 1
-            elif len(result.recording_ids) == 1:
-                self._persist(evidence_store, target.identity_id, "resolved", result.recording_ids[0], "isrc", result.query_fingerprint, result.adapter_version, None, None, result.retrieved_at)
-                counts["resolved"] += 1
-            elif not result.recording_ids:
-                self._persist(evidence_store, target.identity_id, "not_found", None, "isrc", result.query_fingerprint, result.adapter_version, None, None, result.retrieved_at)
-                counts["not_found"] += 1
-            else:
-                digest = self._fingerprint({"recording_ids": list(result.recording_ids)})
-                self._persist(evidence_store, target.identity_id, "ambiguous", None, "isrc", result.query_fingerprint, result.adapter_version, len(result.recording_ids), digest, result.retrieved_at)
-                counts["ambiguous"] += 1
+            counts[self._fetch_target(target.identity_id, evidence_store, lookup)] += 1
         return ExternalRecordingFetchReport(*(counts[name] for name in ("planned", "processed", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_fresh")))
+
+    def retry_failed(self, limit: int, lookup: RecordingLookup) -> ExternalRecordingFailedRetryReport:
+        return self.retry_failed_targets(self.failed_retry_plan(limit), lookup)
+
+    def retry_failed_targets(self, selected: tuple[ExternalRecordingTarget, ...], lookup: RecordingLookup) -> ExternalRecordingFailedRetryReport:
+        counts: Counter[str] = Counter(planned=len(selected))
+        evidence_store = IdentityExternalEvidenceStore(self._store.connection)
+        for target in selected:
+            current = {item.identity_id: item for item in ExternalRecordingTargetProjectionService(self._store, self._binding_id, self._now).preview().targets}
+            current_target = current.get(target.identity_id)
+            if current_target is None or current_target.evidence_state != "fresh_lookup_failed":
+                counts["skipped_not_failed"] += 1
+                continue
+            counts["processed"] += 1
+            counts[self._fetch_target(target.identity_id, evidence_store, lookup)] += 1
+        return ExternalRecordingFailedRetryReport(*(counts[name] for name in ("planned", "processed", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_not_failed")))
+
+    def _fetch_target(self, identity_id: str, evidence_store: IdentityExternalEvidenceStore, lookup: RecordingLookup) -> str:
+        row = self._store.connection.execute("SELECT isrc FROM track_identities WHERE identity_id = ?", (identity_id,)).fetchone()
+        isrc = row[0] if row is not None else None
+        if not isinstance(isrc, str) or not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}\d{7}", isrc):
+            self._persist(evidence_store, identity_id, "insufficient_input", None, "local-input", self._fingerprint({"identity_id": identity_id, "reason": "missing_isrc"}), "local.v1", None, None)
+            return "insufficient_input"
+        try:
+            result = lookup.lookup_recordings_by_isrc(isrc)
+        except Exception:
+            self._persist(evidence_store, identity_id, "lookup_failed", None, "isrc", self._fingerprint({"isrc": isrc}), "musicbrainz-lookup.v1", None, None)
+            return "lookup_failed"
+        if result.failure_category is not None:
+            self._persist(evidence_store, identity_id, "lookup_failed", None, "isrc", result.query_fingerprint, result.adapter_version, None, None, result.retrieved_at)
+            return "lookup_failed"
+        if len(result.recording_ids) == 1:
+            self._persist(evidence_store, identity_id, "resolved", result.recording_ids[0], "isrc", result.query_fingerprint, result.adapter_version, None, None, result.retrieved_at)
+            return "resolved"
+        if not result.recording_ids:
+            self._persist(evidence_store, identity_id, "not_found", None, "isrc", result.query_fingerprint, result.adapter_version, None, None, result.retrieved_at)
+            return "not_found"
+        digest = self._fingerprint({"recording_ids": list(result.recording_ids)})
+        self._persist(evidence_store, identity_id, "ambiguous", None, "isrc", result.query_fingerprint, result.adapter_version, len(result.recording_ids), digest, result.retrieved_at)
+        return "ambiguous"
 
     def _persist(self, store: IdentityExternalEvidenceStore, identity_id: str, state: str, external_id: str | None, method: str, fingerprint: str, version: str, ambiguity_count: int | None, ambiguity_digest: str | None, retrieved_at: str | None = None) -> None:
         now = _parse_time(retrieved_at) if retrieved_at else self._now()
