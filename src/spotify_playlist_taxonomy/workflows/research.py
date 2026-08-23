@@ -7,6 +7,7 @@ import json
 import time
 import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from spotify_playlist_taxonomy.config import ResearchPolicyDocument
@@ -226,6 +227,38 @@ class EvidenceSufficiencyService:
             grouped.setdefault(item.claim_key, set()).add(item.normalized_value)
             lineages.setdefault(item.claim_key, set()).add(item.provider_id or item.source.value)
         return any(len(grouped[key]) > 1 and len(lineages[key]) > 1 for key in grouped)
+
+
+class ResearchActionabilityService:
+    """Read-only projection of Phase 5 provider work currently due."""
+
+    def __init__(
+        self, sufficiency: EvidenceSufficiencyService,
+        now: Callable[[], datetime] | None = None,
+    ) -> None:
+        self.sufficiency = sufficiency
+        self.now = now or (lambda: datetime.now(UTC))
+
+    def project(self, canonical_track_ids: tuple[str, ...]) -> ResearchActionabilityProjection:
+        timestamp = _iso(self.now())
+        actionable: set[str] = set()
+        refresh: set[str] = set()
+        for canonical_track_id in canonical_track_ids:
+            actions = {
+                item.next_action
+                for item in self.sufficiency.assess(canonical_track_id, now=timestamp).assessments
+            }
+            if actions & {SufficiencyAction.QUERY_PROVIDER, SufficiencyAction.REFRESH}:
+                actionable.add(canonical_track_id)
+            if SufficiencyAction.REFRESH in actions:
+                refresh.add(canonical_track_id)
+        return ResearchActionabilityProjection(frozenset(actionable), frozenset(refresh))
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchActionabilityProjection:
+    actionable_canonical_ids: frozenset[str]
+    refresh_canonical_ids: frozenset[str]
 
 
 class ResearchCoordinator:

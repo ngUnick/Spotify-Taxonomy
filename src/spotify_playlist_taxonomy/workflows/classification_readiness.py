@@ -15,6 +15,7 @@ from spotify_playlist_taxonomy.workflows.phase11 import (
     exact_spotify_population_mappings,
     is_exact_spotify_population_mapping,
 )
+from spotify_playlist_taxonomy.workflows.research import ResearchActionabilityService
 
 
 class ReadinessBucket(StrEnum):
@@ -49,6 +50,7 @@ class ClassificationReadinessReport:
     canonicals_with_current_spotify_link: int
     qualifying_research_evidence_canonicals: int
     derivable_research_evidence_canonicals: int
+    research_actionable_canonicals: int
     current_derived_characteristics_canonicals: int
     current_classification_proposals_canonicals: int
     effective_include_canonicals: int
@@ -71,12 +73,16 @@ class ClassificationReadinessReport:
 class ClassificationReadinessService:
     """Projects existing Phase 5-9 state only; it owns no mutation or provider dependency."""
 
-    def __init__(self, connection: sqlite3.Connection, bundle: Phase4Bundle) -> None:
+    def __init__(
+        self, connection: sqlite3.Connection, bundle: Phase4Bundle,
+        research_actionability: ResearchActionabilityService,
+    ) -> None:
         self.connection = connection
         self.bundle = bundle
         self.phase6 = Phase6Service(connection, bundle)
         self.review = Phase7Service(connection, bundle)
         self.phase9 = Phase9Service(connection, bundle)
+        self.research_actionability = research_actionability
 
     def report(self, limit: int = 10) -> ClassificationReadinessReport:
         if not 1 <= limit <= 25:
@@ -88,6 +94,8 @@ class ClassificationReadinessService:
         )
         qualifying = {row["canonical_track_id"] for row in self.phase6.qualifying_evidence()}
         derivable = self.phase6.derivable_canonical_ids()
+        research_plan = self.research_actionability.project(canonical_ids)
+        research_actionable = research_plan.actionable_canonical_ids
         current_characteristics = {
             row[0] for row in self.connection.execute(
                 "SELECT DISTINCT canonical_track_id FROM phase6_characteristic_derivations WHERE state='current'"
@@ -137,7 +145,8 @@ class ClassificationReadinessService:
                 canonical_id, desired, reviews, canonical_id in population_eligible,
                 canonical_id in qualifying, canonical_id in derivable,
                 canonical_id in current_derivations,
-                canonical_id in proposal_canonicals,
+                canonical_id in proposal_canonicals, canonical_id in research_actionable,
+                canonical_id in research_plan.refresh_canonical_ids,
             )
 
         selected_action, selected = self._select(buckets, limit)
@@ -156,6 +165,7 @@ class ClassificationReadinessService:
             canonicals_with_current_spotify_link=mapping_counts["current_spotify"],
             qualifying_research_evidence_canonicals=len(qualifying),
             derivable_research_evidence_canonicals=len(derivable),
+            research_actionable_canonicals=len(research_actionable),
             current_derived_characteristics_canonicals=len(current_characteristics),
             current_classification_proposals_canonicals=len(proposal_canonicals),
             effective_include_canonicals=sum(any(item.effective == "include" for item in effective_by_canonical[key]) for key in canonical_ids),
@@ -212,7 +222,7 @@ class ClassificationReadinessService:
         canonical_id: str, desired: DesiredState, reviews: list[EffectiveReview],
         population_eligible: bool, qualifying_evidence: bool, derivable_evidence: bool,
         current_characteristics: bool,
-        has_proposals: bool,
+        has_proposals: bool, research_actionable: bool, refresh_due: bool,
     ) -> ReadinessSelection:
         target_ids = tuple(sorted({item.output_target_id for item in desired.memberships}))
         if target_ids and population_eligible:
@@ -221,11 +231,13 @@ class ClassificationReadinessService:
             return ReadinessSelection(canonical_id, ReadinessBucket.REVIEW_BLOCKED, "review")
         if not population_eligible:
             return ReadinessSelection(canonical_id, ReadinessBucket.POPULATION_MAPPING_BLOCKED, "resolve_population_mapping")
+        if refresh_due:
+            return ReadinessSelection(canonical_id, ReadinessBucket.RESEARCH_NEEDED, "research_then_derive_then_classify")
         if current_characteristics and not has_proposals:
             return ReadinessSelection(canonical_id, ReadinessBucket.LOCAL_CLASSIFICATION_READY, "classify")
         if derivable_evidence and not current_characteristics:
             return ReadinessSelection(canonical_id, ReadinessBucket.LOCAL_CLASSIFICATION_READY, "derive_then_classify")
-        if not qualifying_evidence:
+        if not qualifying_evidence and research_actionable:
             return ReadinessSelection(canonical_id, ReadinessBucket.RESEARCH_NEEDED, "research_then_derive_then_classify")
         return ReadinessSelection(canonical_id, ReadinessBucket.NO_ACTIONABLE_CLASSIFICATION, "none")
 

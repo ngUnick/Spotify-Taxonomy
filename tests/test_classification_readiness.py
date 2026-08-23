@@ -16,10 +16,15 @@ from spotify_playlist_taxonomy.domain.models import (
     CanonicalTrack, CanonicalTrackIdentityLink, EvidenceKind, IdentityProvider,
     PlatformTrackIdentity, ResearchEvidence, ResearchSource,
 )
-from spotify_playlist_taxonomy.persistence import SQLiteStateStore, apply_migrations, connect_database, sync_taxonomy
+from spotify_playlist_taxonomy.domain.research import EvidenceType
+from spotify_playlist_taxonomy.persistence import ResearchStore, SQLiteStateStore, apply_migrations, connect_database, sync_taxonomy
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
+from spotify_playlist_taxonomy.ports.research import ProviderDescriptor
 from spotify_playlist_taxonomy.workflows.classification_readiness import (
     ClassificationReadinessService, ReadinessBucket,
+)
+from spotify_playlist_taxonomy.workflows.research import (
+    EvidenceSufficiencyService, ResearchActionabilityService,
 )
 
 
@@ -39,7 +44,16 @@ class ClassificationReadinessTests(unittest.TestCase):
         self.connection.execute("INSERT INTO platform_account_bindings VALUES (?, 'spotify', 'account.synthetic.readiness', 'user.synthetic.readiness', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)", (self.binding,))
         phase3 = Phase3Store(self.connection); phase3.register_liked_source(self.source, self.binding)
         phase3.start_scan(scan_id=self.scan, source_id=self.source, binding_id=self.binding, starting_snapshot_id=None, starting_total=None, initial_page_signature=None, digest_version="synthetic.v1")
-        self.service = ClassificationReadinessService(self.connection, self.bundle)
+        descriptors = (ProviderDescriptor(
+            "synthetic", "synthetic.v1", "synthetic.v1", tuple(EvidenceType),
+        ),)
+        sufficiency = EvidenceSufficiencyService(
+            store=ResearchStore(self.connection), descriptors=descriptors,
+            phase4_bundle_digest=self.bundle.digest,
+        )
+        self.service = ClassificationReadinessService(
+            self.connection, self.bundle, ResearchActionabilityService(sufficiency),
+        )
 
     def tearDown(self) -> None:
         self.connection.close(); self.temp.cleanup()
@@ -64,7 +78,8 @@ class ClassificationReadinessTests(unittest.TestCase):
 
     def _evidence(
         self, canonical_id: str, *, evidence_type: str = "style_tradition",
-        value: str = "pop", scope: str = "recording",
+        value: str = "pop", scope: str = "recording", match: str = "exact",
+        fresh_until: str = "2099-01-01T00:00:00Z",
     ) -> None:
         self.store.save_evidence(ResearchEvidence(
             f"evidence.synthetic.readiness.{canonical_id.rsplit('.', 1)[-1]}", canonical_id,
@@ -72,11 +87,23 @@ class ClassificationReadinessTests(unittest.TestCase):
             json.dumps({"claim": evidence_type, "value": value}), "synthetic://evidence", .9,
             provider_id="wikidata", provider_version="synthetic.v1", request_id="request.synthetic",
             query_id="query.synthetic", subject_fingerprint="a" * 64, subject_scope=scope,
-            subject_match="exact", evidence_type=evidence_type, claim_key=evidence_type,
+            subject_match=match, evidence_type=evidence_type, claim_key=evidence_type,
             quality_band="high", normalized_schema_version="research-evidence.v1",
             normalizer_version="evidence-normalizer.v1", retrieved_at="2026-01-01T00:00:00Z",
-            fresh_until="2099-01-01T00:00:00Z", content_digest="b" * 64,
+            fresh_until=fresh_until, content_digest="b" * 64,
         ))
+
+    def _attempt(self, canonical_id: str, suffix: str, outcome: str) -> None:
+        job_id = f"job.synthetic.readiness.{suffix}"
+        self.connection.execute(
+            "INSERT INTO research_jobs VALUES (?, ?, ?, ?, 'research.v1', ?, 'completed', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            (job_id, canonical_id, f"request.synthetic.{suffix}", "a" * 64, self.bundle.digest),
+        )
+        self.connection.execute(
+            "INSERT INTO research_provider_attempts VALUES (?, ?, 'synthetic', 'synthetic.v1', 'query.synthetic', ?, ?, 0, 1, NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL, NULL)",
+            (f"attempt.synthetic.readiness.{suffix}", job_id, "b" * 64, outcome),
+        )
+        self.connection.commit()
 
     def _proposal(self, canonical_id: str, semantic_id: str, decision: str = "include", state: str = "supported", tag: str = "") -> None:
         spec = next(item for item in self.bundle.specifications if item.logical_playlist_id == semantic_id)
@@ -138,6 +165,30 @@ class ClassificationReadinessTests(unittest.TestCase):
         self.assertTrue(all(item.next_action == "research_then_derive_then_classify" for item in report.selections))
         with self.assertRaises(ValueError): self.service.report(0)
         with self.assertRaises(ValueError): self.service.report(26)
+
+    def test_research_selection_uses_phase5_actionability_not_missing_evidence_alone(self) -> None:
+        exhausted = self._canonical("a_exhausted", mapping=True); self._attempt(exhausted, "exhausted", "no_result")
+        actionable = self._canonical("b_actionable_research", mapping=True)
+        ambiguous = self._canonical("c_ambiguous", mapping=True); self._evidence(ambiguous, match="ambiguous"); self._attempt(ambiguous, "ambiguous", "no_result")
+        transient = self._canonical("d_transient", mapping=True); self._attempt(transient, "transient", "transient_error")
+        stale = self._canonical("e_stale", mapping=True); self._evidence(stale, fresh_until="2000-01-01T00:00:00Z")
+        unsupported = self._canonical("f_unsupported", mapping=True); self._attempt(unsupported, "unsupported", "unsupported")
+        before = self.connection.total_changes
+        report = self.service.report(1)
+        self.assertEqual(3, report.research_actionable_canonicals)
+        self.assertEqual(3, report.research_needed_canonicals)
+        self.assertEqual("research", report.selected_action)
+        self.assertEqual((actionable,), tuple(item.canonical_track_id for item in report.selections))
+        self.assertEqual(before, self.connection.total_changes)
+
+    def test_providerless_needs_are_not_research_actionable(self) -> None:
+        canonical_id = self._canonical("providerless", mapping=True)
+        sufficiency = EvidenceSufficiencyService(
+            store=ResearchStore(self.connection), descriptors=(),
+            phase4_bundle_digest=self.bundle.digest,
+        )
+        projection = ResearchActionabilityService(sufficiency).project((canonical_id,))
+        self.assertEqual(frozenset(), projection.actionable_canonical_ids)
 
     def test_readiness_uses_shared_derivability_projection_not_coarse_evidence(self) -> None:
         coarse_only = self._canonical("a_coarse_only", mapping=True)

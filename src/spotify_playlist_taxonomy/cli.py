@@ -84,6 +84,7 @@ from spotify_playlist_taxonomy.workflows.deterministic_match import (
 )
 from spotify_playlist_taxonomy.workflows.research import (
     EvidenceSufficiencyService,
+    ResearchActionabilityService,
     ResearchCoordinator,
 )
 from spotify_playlist_taxonomy.workflows.research_grounding import (
@@ -427,8 +428,39 @@ def _classification_readiness_service(
     try:
         assert_integrity(connection)
         if current_schema_version(connection) < 18: raise PersistenceError("database requires migration 18; run 'db init'")
-        yield ClassificationReadinessService(connection, load_phase4_bundle(config_path))
+        bundle = load_phase4_bundle(config_path)
+        policy = _load_research_policy(config_path, config)
+        descriptors = _offline_research_descriptors(policy)
+        sufficiency = EvidenceSufficiencyService(
+            store=ResearchStore(connection), descriptors=descriptors,
+            phase4_bundle_digest=bundle.digest,
+        )
+        yield ClassificationReadinessService(
+            connection, bundle, ResearchActionabilityService(sufficiency),
+        )
     finally: connection.close()
+
+
+def _offline_research_descriptors(policy):
+    """Construct static enabled-provider descriptors without provider I/O."""
+
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda request: (_ for _ in ()).throw(
+            AssertionError("offline descriptor construction attempted network access")
+        )),
+        trust_env=False,
+    ) as offline_client:
+        descriptors = []
+        for item in policy.providers:
+            if item.provider_id == "musicbrainz" and item.enabled:
+                descriptors.append(MusicBrainzResearchProvider(
+                    client=offline_client, policy=item,
+                ).descriptor)
+            elif item.provider_id == "wikidata" and item.enabled:
+                descriptors.append(WikidataResearchProvider(
+                    client=offline_client, policy=item,
+                ).descriptor)
+        return tuple(descriptors)
 
 
 @app.callback()
@@ -1155,6 +1187,7 @@ def catalogue_classify_readiness(
             "canonical_tracks_total", "classification_eligible_canonicals",
             "spotify_population_eligible_canonicals", "qualifying_research_evidence_canonicals",
             "derivable_research_evidence_canonicals",
+            "research_actionable_canonicals",
             "spotify_mapping_exactly_one_safe_canonicals", "spotify_mapping_zero_current_canonicals",
             "spotify_mapping_multiple_current_canonicals", "spotify_mapping_account_context_unavailable_canonicals",
             "spotify_mapping_provider_mismatch_canonicals", "spotify_mapping_invalid_canonicals",
