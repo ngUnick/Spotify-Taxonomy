@@ -71,9 +71,10 @@ class ResearchGroundingTests(unittest.TestCase):
         self.connection.commit()
         return identity_id
 
-    def _evidence(self, identity_id: str, state: str = "resolved", recording_id: str | None = MBID_A, *, fresh: bool = True, provider: str = "musicbrainz", entity_type: str = "recording") -> None:
+    def _evidence(self, identity_id: str, state: str = "resolved", recording_id: str | None = MBID_A, *, fresh: bool = True, provider: str = "musicbrainz", entity_type: str = "recording", fresh_until: datetime | None = None) -> None:
         stamp = NOW.isoformat().replace("+00:00", "Z")
-        until = (NOW + timedelta(days=1) if fresh else NOW - timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
+        expiry = fresh_until or (NOW + timedelta(days=1) if fresh else NOW - timedelta(seconds=1))
+        until = expiry.isoformat().replace("+00:00", "Z")
         IdentityExternalEvidenceStore(self.connection).upsert(IdentityExternalEntityEvidence(
             f"external.synthetic.grounding.{identity_id}", identity_id, provider, entity_type,
             recording_id if state == "resolved" else None, state, "isrc", "synthetic-query", "synthetic.v1", stamp, until, None, None,
@@ -140,6 +141,25 @@ class ResearchGroundingTests(unittest.TestCase):
         with self.assertRaises(ValueError): service.preview(0)
         with self.assertRaises(ValueError): service.preview(26)
 
+    def test_preview_exact_scope_filters_after_whole_catalogue_aggregation(self) -> None:
+        unavailable = self._canonical("a.unavailable"); self._link(unavailable, "a.unavailable")
+        exact_b = self._canonical("b.exact"); exact_b_id = self._link(exact_b, "b.exact"); self._evidence(exact_b_id)
+        exact_c = self._canonical("c.exact"); exact_c_id = self._link(exact_c, "c.exact"); self._evidence(exact_c_id)
+        before = tuple(self.connection.iterdump())
+        service = ResearchGroundingPreviewService(self._resolver())
+        all_report = service.preview(1)
+        exact_report = service.preview(1, "exact")
+        self.assertEqual((unavailable,), tuple(item.canonical_track_id for item in all_report.selected))
+        self.assertEqual((exact_b,), tuple(item.canonical_track_id for item in exact_report.selected))
+        self.assertEqual(
+            (all_report.canonical_tracks_total, all_report.grounding_exact_canonicals, all_report.grounding_unavailable_canonicals),
+            (exact_report.canonical_tracks_total, exact_report.grounding_exact_canonicals, exact_report.grounding_unavailable_canonicals),
+        )
+        self.assertEqual((exact_b, exact_c), tuple(item.canonical_track_id for item in service.preview(25, "exact").selected))
+        self.assertTrue(all(item.is_exact for item in exact_report.selected))
+        self.assertEqual(before, tuple(self.connection.iterdump()))
+        with self.assertRaises(ValueError): service.preview(1, "unavailable")
+
     def test_safe_grounding_is_the_existing_direct_musicbrainz_identifier_form(self) -> None:
         canonical_id = self._canonical("coordinator"); identity_id = self._link(canonical_id, "coordinator"); self._evidence(identity_id)
         provider = CaptureProvider()
@@ -161,6 +181,21 @@ class ResearchGroundingTests(unittest.TestCase):
         self.assertIn("network_access: no", result.output)
         self.assertIn("database_write: no", result.output)
         self.assertNotIn(MBID_A, result.output)
+
+    def test_preview_cli_exact_scope_is_bounded_and_hides_unavailable_details(self) -> None:
+        unavailable = self._canonical("a.cli-unavailable"); self._link(unavailable, "a.cli-unavailable")
+        exact = self._canonical("b.cli-exact"); exact_id = self._link(exact, "b.cli-exact"); self._evidence(exact_id, fresh_until=datetime.now(UTC) + timedelta(days=1))
+        data_dir = Path(self.temp.name) / "runtime-exact"; (data_dir / "state").mkdir(parents=True)
+        target = connect_database(data_dir / "state" / "app.db"); self.connection.backup(target); target.close()
+        command = ["research", "grounding", "preview", "--scope", "exact", "--limit", "1", "--config", str(ROOT / "config" / "application.yaml"), "--data-dir", str(data_dir)]
+        result = CliRunner().invoke(app, command)
+        self.assertEqual(0, result.exit_code, result.output)
+        self.assertIn(f"canonical_track_id: {exact}\tgrounding=exact", result.output)
+        self.assertNotIn(unavailable, result.output)
+        self.assertNotIn("reason=", result.output)
+        self.assertNotIn(MBID_A, result.output)
+        invalid = CliRunner().invoke(app, [*command, "--scope", "invalid"])
+        self.assertNotEqual(0, invalid.exit_code)
 
 
 if __name__ == "__main__":

@@ -1750,6 +1750,7 @@ def research_run(
 @research_grounding_app.command("preview")
 def research_grounding_preview(
     limit: int = typer.Option(10, "--limit", min=1, max=25),
+    scope: str = typer.Option("all", "--scope", case_sensitive=False, help="Select all or exact-grounded canonical rows."),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
     data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
 ) -> None:
@@ -1758,7 +1759,7 @@ def research_grounding_preview(
         with _research_store(config_path, data_dir) as (_, _, store):
             report = ResearchGroundingPreviewService(
                 CanonicalExternalSubjectResolver(store.connection)
-            ).preview(limit)
+            ).preview(limit, scope)
         for name in (
             "canonical_tracks_total", "grounding_exact_canonicals", "grounding_unavailable_canonicals",
             "no_active_account_context_canonicals", "no_current_spotify_identity_canonicals",
@@ -1768,7 +1769,10 @@ def research_grounding_preview(
         ):
             _safe_echo(f"{name}: {getattr(report, name)}")
         for item in report.selected:
-            _safe_echo(f"canonical_track_id: {item.canonical_track_id}\tgrounding={item.state}\treason={item.reason}")
+            if scope == "exact":
+                _safe_echo(f"canonical_track_id: {item.canonical_track_id}\tgrounding={item.state}")
+            else:
+                _safe_echo(f"canonical_track_id: {item.canonical_track_id}\tgrounding={item.state}\treason={item.reason}")
         _safe_echo("network_access: no\ndatabase_write: no")
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)

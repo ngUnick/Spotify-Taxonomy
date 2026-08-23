@@ -129,9 +129,11 @@ class ResearchGroundingPreviewService:
     def __init__(self, resolver: CanonicalExternalSubjectResolver) -> None:
         self.resolver = resolver
 
-    def preview(self, limit: int) -> ResearchGroundingPreview:
+    def preview(self, limit: int, scope: str = "all") -> ResearchGroundingPreview:
         if not 1 <= limit <= 25:
             raise ValueError("limit must be between 1 and 25")
+        if scope not in {"all", "exact"}:
+            raise ValueError("scope must be either 'all' or 'exact'")
         canonical_ids = tuple(
             row["canonical_track_id"] for row in self.resolver.connection.execute(
                 "SELECT canonical_track_id FROM canonical_tracks ORDER BY canonical_track_id"
@@ -143,7 +145,10 @@ class ResearchGroundingPreviewService:
             if not item.is_exact:
                 counts[item.reason] += 1
         exact = sum(item.is_exact for item in all_results)
+        selected = all_results if scope == "all" else tuple(
+            item for item in all_results if item.is_exact
+        )
         return ResearchGroundingPreview(
             len(all_results), exact, len(all_results) - exact,
-            *(counts[reason] for reason in _UNAVAILABLE_REASONS), all_results[:limit],
+            *(counts[reason] for reason in _UNAVAILABLE_REASONS), selected[:limit],
         )
