@@ -55,11 +55,24 @@ class Phase6Service:
         self.definitions = {item.characteristic_id: item for item in bundle.vocabulary.characteristics}
 
     def derive(self, canonical_track_id: str) -> tuple[DerivedCharacteristic, ...]:
-        rows = self.qualifying_evidence(canonical_track_id)
+        return self._derive_from_rows(canonical_track_id, self.qualifying_evidence(canonical_track_id))
+
+    def derivable_canonical_ids(self) -> frozenset[str]:
+        """Project canonicals whose current eligible evidence materializes a derivation."""
+
+        rows_by_canonical: dict[str, list[sqlite3.Row]] = {}
+        for row in self.qualifying_evidence():
+            rows_by_canonical.setdefault(row["canonical_track_id"], []).append(row)
+        return frozenset(
+            canonical_id for canonical_id, rows in rows_by_canonical.items()
+            if self._derive_from_rows(canonical_id, tuple(rows))
+        )
+
+    def _derive_from_rows(
+        self, canonical_track_id: str, rows: tuple[sqlite3.Row, ...],
+    ) -> tuple[DerivedCharacteristic, ...]:
         candidates: dict[str, list[tuple[sqlite3.Row, Any]]] = {}
         for row in rows:
-            if row["subject_match"] != "exact" or row["quality_band"] not in {"high", "medium"}:
-                continue
             rule = self._RULES.get(row["evidence_type"] or row["claim_key"])
             if rule is None or row["subject_scope"] not in rule[1]:
                 continue

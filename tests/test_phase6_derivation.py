@@ -15,8 +15,8 @@ from spotify_playlist_taxonomy.workflows.phase6 import DERIVATION_VERSION, Phase
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def evidence(evidence_id: str, value: object, *, evidence_type: str = "style_tradition", scope: str = "recording", match: str = "exact", state: str = "active") -> ResearchEvidence:
-    return ResearchEvidence(evidence_id, "canonical.synthetic.phase6", ResearchSource.WIKIDATA, EvidenceKind.SOURCED_FACT,
+def evidence(evidence_id: str, value: object, *, canonical_id: str = "canonical.synthetic.phase6", evidence_type: str = "style_tradition", scope: str = "recording", match: str = "exact", state: str = "active") -> ResearchEvidence:
+    return ResearchEvidence(evidence_id, canonical_id, ResearchSource.WIKIDATA, EvidenceKind.SOURCED_FACT,
         json.dumps({"claim": evidence_type, "value": value}), "https://example.invalid/evidence", .9,
         provider_id="wikidata", provider_version="wikidata.v1", request_id="request.synthetic", query_id="query.synthetic",
         subject_fingerprint="a" * 64, subject_scope=scope, subject_match=match, evidence_type=evidence_type,
@@ -50,6 +50,19 @@ class Phase6DerivationTests(unittest.TestCase):
         self.store.save_evidence(evidence("evidence.synthetic.probable", "rock", match="probable"))
         self.store.save_evidence(evidence("evidence.synthetic.context", "rock", scope="artist"))
         self.assertEqual((), self.service.derive("canonical.synthetic.phase6"))
+
+    def test_derivability_projection_uses_the_same_value_validation_as_derive(self) -> None:
+        invalid = "canonical.synthetic.phase6.invalid-version"
+        self.store.save_canonical_track(CanonicalTrack(invalid, "Synthetic Invalid", ("Invented Act",)))
+        self.store.save_evidence(evidence("evidence.synthetic.invalid-version", "unmapped_version", canonical_id=invalid, evidence_type="version_information"))
+        self.store.save_evidence(evidence("evidence.synthetic.valid", "pop"))
+        before = self.connection.total_changes
+        derivable = self.service.derivable_canonical_ids()
+        self.assertIn("canonical.synthetic.phase6", derivable)
+        self.assertNotIn(invalid, derivable)
+        self.assertEqual(bool(self.service.derive("canonical.synthetic.phase6")), "canonical.synthetic.phase6" in derivable)
+        self.assertEqual(bool(self.service.derive(invalid)), invalid in derivable)
+        self.assertEqual(before, self.connection.total_changes)
 
     def test_conflicting_single_value_is_preserved_not_collapsed(self) -> None:
         self.store.save_evidence(evidence("evidence.synthetic.language-a", "greek", evidence_type="lyrical_language", scope="work"))

@@ -1154,6 +1154,7 @@ def catalogue_classify_readiness(
         for name in (
             "canonical_tracks_total", "classification_eligible_canonicals",
             "spotify_population_eligible_canonicals", "qualifying_research_evidence_canonicals",
+            "derivable_research_evidence_canonicals",
             "spotify_mapping_exactly_one_safe_canonicals", "spotify_mapping_zero_current_canonicals",
             "spotify_mapping_multiple_current_canonicals", "spotify_mapping_account_context_unavailable_canonicals",
             "spotify_mapping_provider_mismatch_canonicals", "spotify_mapping_invalid_canonicals",

@@ -48,6 +48,7 @@ class ClassificationReadinessReport:
     canonicals_with_any_current_account_link: int
     canonicals_with_current_spotify_link: int
     qualifying_research_evidence_canonicals: int
+    derivable_research_evidence_canonicals: int
     current_derived_characteristics_canonicals: int
     current_classification_proposals_canonicals: int
     effective_include_canonicals: int
@@ -86,9 +87,16 @@ class ClassificationReadinessService:
             )
         )
         qualifying = {row["canonical_track_id"] for row in self.phase6.qualifying_evidence()}
+        derivable = self.phase6.derivable_canonical_ids()
         current_characteristics = {
             row[0] for row in self.connection.execute(
                 "SELECT DISTINCT canonical_track_id FROM phase6_characteristic_derivations WHERE state='current'"
+            )
+        }
+        current_derivations = {
+            row[0] for row in self.connection.execute(
+                "SELECT DISTINCT canonical_track_id FROM phase6_characteristic_derivations "
+                "WHERE state IN ('current', 'conflicting')"
             )
         }
         proposal_canonicals = {
@@ -127,7 +135,8 @@ class ClassificationReadinessService:
             desired = desired_by_canonical[canonical_id]
             buckets[canonical_id] = self._bucket(
                 canonical_id, desired, reviews, canonical_id in population_eligible,
-                canonical_id in qualifying, canonical_id in current_characteristics,
+                canonical_id in qualifying, canonical_id in derivable,
+                canonical_id in current_derivations,
                 canonical_id in proposal_canonicals,
             )
 
@@ -146,6 +155,7 @@ class ClassificationReadinessService:
             canonicals_with_any_current_account_link=mapping_counts["any_current"],
             canonicals_with_current_spotify_link=mapping_counts["current_spotify"],
             qualifying_research_evidence_canonicals=len(qualifying),
+            derivable_research_evidence_canonicals=len(derivable),
             current_derived_characteristics_canonicals=len(current_characteristics),
             current_classification_proposals_canonicals=len(proposal_canonicals),
             effective_include_canonicals=sum(any(item.effective == "include" for item in effective_by_canonical[key]) for key in canonical_ids),
@@ -200,7 +210,8 @@ class ClassificationReadinessService:
     @staticmethod
     def _bucket(
         canonical_id: str, desired: DesiredState, reviews: list[EffectiveReview],
-        population_eligible: bool, qualifying_evidence: bool, current_characteristics: bool,
+        population_eligible: bool, qualifying_evidence: bool, derivable_evidence: bool,
+        current_characteristics: bool,
         has_proposals: bool,
     ) -> ReadinessSelection:
         target_ids = tuple(sorted({item.output_target_id for item in desired.memberships}))
@@ -210,9 +221,10 @@ class ClassificationReadinessService:
             return ReadinessSelection(canonical_id, ReadinessBucket.REVIEW_BLOCKED, "review")
         if not population_eligible:
             return ReadinessSelection(canonical_id, ReadinessBucket.POPULATION_MAPPING_BLOCKED, "resolve_population_mapping")
-        if qualifying_evidence and (not current_characteristics or not has_proposals):
-            action = "derive_then_classify" if not current_characteristics else "classify"
-            return ReadinessSelection(canonical_id, ReadinessBucket.LOCAL_CLASSIFICATION_READY, action)
+        if current_characteristics and not has_proposals:
+            return ReadinessSelection(canonical_id, ReadinessBucket.LOCAL_CLASSIFICATION_READY, "classify")
+        if derivable_evidence and not current_characteristics:
+            return ReadinessSelection(canonical_id, ReadinessBucket.LOCAL_CLASSIFICATION_READY, "derive_then_classify")
         if not qualifying_evidence:
             return ReadinessSelection(canonical_id, ReadinessBucket.RESEARCH_NEEDED, "research_then_derive_then_classify")
         return ReadinessSelection(canonical_id, ReadinessBucket.NO_ACTIONABLE_CLASSIFICATION, "none")

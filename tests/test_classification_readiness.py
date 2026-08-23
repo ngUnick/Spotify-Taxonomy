@@ -62,14 +62,17 @@ class ClassificationReadinessTests(unittest.TestCase):
         self.connection.execute("INSERT INTO account_canonical_identity_links VALUES (?, ?, ?, ?, '2026-01-01T00:00:00Z')", (f"link.synthetic.readiness.{suffix}", self.binding, identity_id, canonical_id))
         self.connection.commit()
 
-    def _evidence(self, canonical_id: str) -> None:
+    def _evidence(
+        self, canonical_id: str, *, evidence_type: str = "style_tradition",
+        value: str = "pop", scope: str = "recording",
+    ) -> None:
         self.store.save_evidence(ResearchEvidence(
             f"evidence.synthetic.readiness.{canonical_id.rsplit('.', 1)[-1]}", canonical_id,
             ResearchSource.WIKIDATA, EvidenceKind.SOURCED_FACT,
-            json.dumps({"claim": "style_tradition", "value": "pop"}), "synthetic://evidence", .9,
+            json.dumps({"claim": evidence_type, "value": value}), "synthetic://evidence", .9,
             provider_id="wikidata", provider_version="synthetic.v1", request_id="request.synthetic",
-            query_id="query.synthetic", subject_fingerprint="a" * 64, subject_scope="recording",
-            subject_match="exact", evidence_type="style_tradition", claim_key="style_tradition",
+            query_id="query.synthetic", subject_fingerprint="a" * 64, subject_scope=scope,
+            subject_match="exact", evidence_type=evidence_type, claim_key=evidence_type,
             quality_band="high", normalized_schema_version="research-evidence.v1",
             normalizer_version="evidence-normalizer.v1", retrieved_at="2026-01-01T00:00:00Z",
             fresh_until="2099-01-01T00:00:00Z", content_digest="b" * 64,
@@ -135,6 +138,36 @@ class ClassificationReadinessTests(unittest.TestCase):
         self.assertTrue(all(item.next_action == "research_then_derive_then_classify" for item in report.selections))
         with self.assertRaises(ValueError): self.service.report(0)
         with self.assertRaises(ValueError): self.service.report(26)
+
+    def test_readiness_uses_shared_derivability_projection_not_coarse_evidence(self) -> None:
+        coarse_only = self._canonical("a_coarse_only", mapping=True)
+        self._evidence(coarse_only, evidence_type="version_information", value="unmapped_version")
+        actionable = self._canonical("b_actionable", mapping=True)
+        self._evidence(actionable)
+        before = self.connection.total_changes
+        report = self.service.report(1)
+        self.assertEqual(2, report.qualifying_research_evidence_canonicals)
+        self.assertEqual(1, report.derivable_research_evidence_canonicals)
+        self.assertEqual(1, report.local_classification_ready_canonicals)
+        self.assertEqual("local-classification", report.selected_action)
+        self.assertEqual((actionable,), tuple(item.canonical_track_id for item in report.selections))
+        self.assertEqual("derive_then_classify", report.selections[0].next_action)
+        self.assertEqual((), self.service.phase6.derive(coarse_only))
+        self.assertTrue(self.service.phase6.derive(actionable))
+        self.assertEqual(before, self.connection.total_changes)
+
+    def test_current_derivation_classifies_once_then_becomes_non_actionable(self) -> None:
+        canonical_id = self._canonical("current", mapping=True)
+        self._evidence(canonical_id)
+        self.service.phase6.persist_derivations(self.service.phase6.derive(canonical_id))
+        report = self.service.report(1)
+        self.assertEqual("local-classification", report.selected_action)
+        self.assertEqual("classify", report.selections[0].next_action)
+        self.service.phase6.classify(canonical_id)
+        report = self.service.report(25)
+        self.assertEqual(0, report.local_classification_ready_canonicals)
+        self.assertEqual(1, report.effective_abstain_canonicals)
+        self.assertEqual("none", report.selected_action)
 
     def test_nonmembership_and_mapping_boundaries_fail_closed(self) -> None:
         excluded = self._canonical("excluded", mapping=True); self._proposal(excluded, "vibe.chill", "exclude")
