@@ -91,6 +91,9 @@ from spotify_playlist_taxonomy.workflows.research_grounding import (
     CanonicalExternalSubjectResolver,
     ResearchGroundingPreviewService,
 )
+from spotify_playlist_taxonomy.workflows.research_grounding_acquisition import (
+    ResearchGroundingAcquisitionService,
+)
 from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
@@ -122,6 +125,7 @@ catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit can
 catalogue_classify_app = typer.Typer(no_args_is_help=True, help="Inspect local supervised classification readiness.")
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
 research_grounding_app = typer.Typer(no_args_is_help=True, help="Preview local exact external research-subject grounding.")
+research_grounding_acquire_app = typer.Typer(no_args_is_help=True, help="Bounded exact-grounding acquisition for research-ready canonicals.")
 derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characteristics from persisted evidence.")
 classify_app = typer.Typer(no_args_is_help=True, help="Evaluate offline semantic proposals from characteristics.")
 review_app = typer.Typer(no_args_is_help=True, help="Review local semantic proposals without network access.")
@@ -155,6 +159,7 @@ catalogue_app.add_typer(catalogue_link_app, name="link")
 catalogue_app.add_typer(catalogue_classify_app, name="classify")
 app.add_typer(research_app, name="research")
 research_app.add_typer(research_grounding_app, name="grounding")
+research_grounding_app.add_typer(research_grounding_acquire_app, name="acquire")
 app.add_typer(derive_app, name="derive")
 app.add_typer(classify_app, name="classify")
 app.add_typer(review_app, name="review")
@@ -461,6 +466,28 @@ def _offline_research_descriptors(policy):
                     client=offline_client, policy=item,
                 ).descriptor)
         return tuple(descriptors)
+
+
+def _research_grounding_acquisition_service(
+    config_path: Path, config: ApplicationConfig, store: ResearchStore,
+) -> ResearchGroundingAcquisitionService:
+    """Build the local projection without instantiating an online provider client."""
+
+    bundle = load_phase4_bundle(config_path)
+    policy = _load_research_policy(config_path, config)
+    sufficiency = EvidenceSufficiencyService(
+        store=store, descriptors=_offline_research_descriptors(policy),
+        phase4_bundle_digest=bundle.digest,
+    )
+    readiness = ClassificationReadinessService(
+        store.connection, bundle, ResearchActionabilityService(sufficiency),
+    )
+    return ResearchGroundingAcquisitionService(
+        store.connection, readiness, CanonicalExternalSubjectResolver(store.connection),
+        positive_ttl_hours=policy.positive_ttl_hours,
+        negative_ttl_hours=policy.negative_ttl_hours,
+        ambiguous_ttl_hours=policy.ambiguous_ttl_hours,
+    )
 
 
 @app.callback()
@@ -1809,6 +1836,75 @@ def research_grounding_preview(
                 _safe_echo(f"canonical_track_id: {item.canonical_track_id}\tgrounding={item.state}\treason={item.reason}")
         _safe_echo("network_access: no\ndatabase_write: no")
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@research_grounding_acquire_app.command("preview")
+def research_grounding_acquire_preview(
+    limit: int = typer.Option(10, "--limit", min=1, max=25),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Project bounded exact-grounding acquisition locally with no I/O or writes."""
+    try:
+        config_path = config_path.resolve()
+        with _research_store(config_path, data_dir) as (config, _, store):
+            if current_schema_version(store.connection) < 18:
+                raise PersistenceError("database requires migration 18; run 'db init'")
+            preview = _research_grounding_acquisition_service(config_path, config, store).preview()
+        reasons = dict(preview.unavailable_reason_counts)
+        for name, value in (
+            ("research_needed_canonicals", preview.research_needed_canonicals),
+            ("grounding_exact_canonicals", preview.grounding_exact_canonicals),
+            ("grounding_acquisition_eligible_canonicals", preview.grounding_acquisition_eligible_canonicals),
+            ("grounding_acquisition_unavailable_canonicals", preview.grounding_acquisition_unavailable_canonicals),
+        ):
+            _safe_echo(f"{name}: {value}")
+        for reason, value in sorted(reasons.items()):
+            _safe_echo(f"unavailable_{reason}: {value}")
+        for item in preview.targets[:limit]:
+            _safe_echo(f"canonical_track_id: {item.canonical_track_id}\tacquisition={item.state}\treason={item.reason}")
+        _safe_echo("network_access: no\ndatabase_write: no\nspotify_access: no")
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@research_grounding_acquire_app.command("fetch")
+def research_grounding_acquire_fetch(
+    network: bool = typer.Option(False, "--network", help="Explicitly authorize MusicBrainz access."),
+    limit: int = typer.Option(..., "--limit", min=1, max=25),
+    yes: bool = typer.Option(False, "--yes"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Fetch exact-grounding evidence only after explicit network authorization."""
+    try:
+        if not network:
+            raise ValueError("grounding acquisition requires explicit --network")
+        config_path = config_path.resolve()
+        with _research_store(config_path, data_dir) as (config, _, store):
+            if current_schema_version(store.connection) < 18:
+                raise PersistenceError("database requires migration 18; run 'db init'")
+            policy = _load_research_policy(config_path, config)
+            provider_policy = next(item for item in policy.providers if item.provider_id == "musicbrainz" and item.enabled)
+            service = _research_grounding_acquisition_service(config_path, config, store)
+            selected = service.plan(limit)
+            _safe_echo(f"eligible_targets: {service.preview().grounding_acquisition_eligible_canonicals}\nselected: {len(selected)}\nprovider: musicbrainz\nnetwork_access: yes\nmatching_mutation: no")
+            if not yes and not typer.confirm("Fetch bounded MusicBrainz Recording grounding evidence for selected canonicals?"):
+                raise typer.Abort()
+            with httpx.Client(timeout=policy.request_timeout_seconds, verify=True, follow_redirects=False, trust_env=False) as client:
+                report = service.fetch(selected, MusicBrainzResearchProvider(
+                    client=client, policy=provider_policy, lookup_max_attempts=policy.max_attempts,
+                ))
+        for name in (
+            "selected", "processed", "resolved", "ambiguous", "not_found",
+            "insufficient_input", "lookup_failed", "skipped_stale_or_ineligible",
+        ):
+            _safe_echo(f"{name}: {getattr(report, name)}")
+        for canonical_id in report.exactly_grounded_canonical_ids:
+            _safe_echo(f"exactly_grounded_canonical_id: {canonical_id}")
+        _safe_echo("matching_mutations: 0\nphase5_research_attempts: 0\nphase6_derivations: 0\nspotify_access: no")
+    except (OSError, LookupError, StopIteration, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
 
 

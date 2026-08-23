@@ -63,6 +63,7 @@ class ClassificationReadinessReport:
     population_ready_canonicals: int
     local_classification_ready_canonicals: int
     research_needed_canonicals: int
+    research_needed_canonical_ids: tuple[str, ...]
     review_blocked_canonicals: int
     population_mapping_blocked_canonicals: int
     selected_action: str
@@ -178,6 +179,10 @@ class ClassificationReadinessService:
             population_ready_canonicals=sum(item.bucket is ReadinessBucket.POPULATION_READY for item in values),
             local_classification_ready_canonicals=sum(item.bucket is ReadinessBucket.LOCAL_CLASSIFICATION_READY for item in values),
             research_needed_canonicals=sum(item.bucket is ReadinessBucket.RESEARCH_NEEDED for item in values),
+            research_needed_canonical_ids=tuple(
+                canonical_id for canonical_id in canonical_ids
+                if buckets[canonical_id].bucket is ReadinessBucket.RESEARCH_NEEDED
+            ),
             review_blocked_canonicals=sum(item.bucket is ReadinessBucket.REVIEW_BLOCKED for item in values),
             population_mapping_blocked_canonicals=sum(item.bucket is ReadinessBucket.POPULATION_MAPPING_BLOCKED for item in values),
             selected_action=selected_action,

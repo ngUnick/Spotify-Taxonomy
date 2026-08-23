@@ -201,7 +201,34 @@ class ExternalRecordingEvidenceFetchService:
         return ExternalRecordingFailedRetryReport(*(counts[name] for name in ("planned", "processed", "resolved", "ambiguous", "not_found", "insufficient_input", "lookup_failed", "skipped_not_failed")))
 
     def _fetch_target(self, identity_id: str, evidence_store: IdentityExternalEvidenceStore, lookup: RecordingLookup) -> str:
-        row = self._store.connection.execute("SELECT isrc FROM track_identities WHERE identity_id = ?", (identity_id,)).fetchone()
+        return ExternalRecordingIdentityEvidenceFetcher(
+            self._store.connection,
+            positive_ttl_hours=self._positive_ttl_hours,
+            negative_ttl_hours=self._negative_ttl_hours,
+            ambiguous_ttl_hours=self._ambiguous_ttl_hours,
+            now=self._now,
+        ).fetch(identity_id, lookup)
+
+
+class ExternalRecordingIdentityEvidenceFetcher:
+    """Persist one identity's MusicBrainz Recording lookup without matching authority."""
+
+    def __init__(
+        self, connection, *, positive_ttl_hours: int, negative_ttl_hours: int,
+        ambiguous_ttl_hours: int, now: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._connection = connection
+        self._positive_ttl_hours = positive_ttl_hours
+        self._negative_ttl_hours = negative_ttl_hours
+        self._ambiguous_ttl_hours = ambiguous_ttl_hours
+        self._now = now or (lambda: datetime.now(UTC))
+
+    def fetch(self, identity_id: str, lookup: RecordingLookup) -> str:
+        evidence_store = IdentityExternalEvidenceStore(self._connection)
+        return self._fetch_target(identity_id, evidence_store, lookup)
+
+    def _fetch_target(self, identity_id: str, evidence_store: IdentityExternalEvidenceStore, lookup: RecordingLookup) -> str:
+        row = self._connection.execute("SELECT isrc FROM track_identities WHERE identity_id = ?", (identity_id,)).fetchone()
         isrc = row[0] if row is not None else None
         if not _has_usable_isrc(isrc):
             self._persist(evidence_store, identity_id, "insufficient_input", None, "local-input", self._fingerprint({"identity_id": identity_id, "reason": "missing_isrc"}), "local.v1", None, None)

@@ -30,6 +30,13 @@ bounded `research run ... --network` command. Offline evidence/status inspection
 It does **not** assign tracks, route Genre variants, create desired state, or modify Spotify. Runtime
 Greek/Foreign routing remains downstream of semantic classification.
 
+For research-ready, safely mapped canonicals with a locally persisted ISRC, exact MusicBrainz Recording
+grounding is a separate bounded operator workflow: `research grounding acquire preview --limit N` is local
+and read-only, while `research grounding acquire fetch --network --limit N` explicitly persists only the
+existing identity-scoped Recording-evidence states. The ISRC is used solely to resolve that research subject;
+it is never classification evidence or canonical-match authority. Acquisition neither runs Phase 5 research
+nor derives, classifies, or changes matching state.
+
 The 15 Genre meanings remain unsplit. Each independently approved Genre membership will later route to a
 Greek or Foreign output target using exact-recording language and cultural-context evidence. Foreign means
 all non-Greek languages and contexts, not only English; unresolved routing remains reviewable.
@@ -105,6 +112,8 @@ spotify-taxonomy catalogue match reject CANDIDATE_ID
 spotify-taxonomy catalogue link list
 spotify-taxonomy catalogue link unlink IDENTITY_ID
 spotify-taxonomy research run CANONICAL_ID... --network
+spotify-taxonomy research grounding acquire preview --limit 10
+spotify-taxonomy research grounding acquire fetch --network --limit 10
 spotify-taxonomy research show CANONICAL_ID
 spotify-taxonomy research status [CANONICAL_ID]
 ```
