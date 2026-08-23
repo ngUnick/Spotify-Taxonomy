@@ -142,6 +142,35 @@ class ResearchGroundingAcquisitionTests(unittest.TestCase):
         self.assertNotEqual(0, blocked.exit_code)
         self.assertIn("requires explicit --network", blocked.output)
 
+    def test_cli_eligible_scope_renders_the_same_batch_as_fetch_plan(self) -> None:
+        unavailable, _ = self._canonical("a.missing", None)
+        first_eligible, _ = self._canonical("b.eligible")
+        second_eligible, _ = self._canonical("c.eligible")
+        self.assertEqual((first_eligible, second_eligible), tuple(item.canonical_track_id for item in self.service.plan(25)))
+        data_dir = Path(self.temp.name) / "runtime-eligible"; (data_dir / "state").mkdir(parents=True)
+        target = connect_database(data_dir / "state" / "app.db"); self.connection.backup(target); target.close()
+        base = ["research", "grounding", "acquire", "preview", "--config", str(ROOT / "config" / "application.yaml"), "--data-dir", str(data_dir)]
+        all_result = CliRunner().invoke(app, [*base, "--limit", "1"])
+        eligible_one = CliRunner().invoke(app, [*base, "--scope", "eligible", "--limit", "1"])
+        eligible_all = CliRunner().invoke(app, [*base, "--scope", "eligible", "--limit", "25"])
+        self.assertEqual(0, all_result.exit_code, all_result.output)
+        self.assertEqual(0, eligible_one.exit_code, eligible_one.output)
+        self.assertEqual(0, eligible_all.exit_code, eligible_all.output)
+        self.assertIn(f"canonical_track_id: {unavailable}", all_result.output)
+        self.assertNotIn(unavailable, eligible_one.output)
+        self.assertIn(f"canonical_track_id: {first_eligible}\tacquisition=eligible", eligible_one.output)
+        self.assertIn(f"canonical_track_id: {first_eligible}\tacquisition=eligible", eligible_all.output)
+        self.assertIn(f"canonical_track_id: {second_eligible}\tacquisition=eligible", eligible_all.output)
+        fields = ("research_needed_canonicals", "grounding_exact_canonicals", "grounding_acquisition_eligible_canonicals", "grounding_acquisition_unavailable_canonicals")
+        for field in fields:
+            self.assertEqual(
+                next(line for line in all_result.output.splitlines() if line.startswith(field + ":")),
+                next(line for line in eligible_one.output.splitlines() if line.startswith(field + ":")),
+            )
+        self.assertNotIn(MBID, eligible_all.output)
+        invalid = CliRunner().invoke(app, [*base, "--scope", "invalid", "--limit", "1"])
+        self.assertNotEqual(0, invalid.exit_code)
+
     def test_cli_fetch_uses_mocked_existing_lookup_and_reports_exact_grounding(self) -> None:
         canonical_id, _ = self._canonical("cli-fetch")
         data_dir = Path(self.temp.name) / "runtime-fetch"; (data_dir / "state").mkdir(parents=True)

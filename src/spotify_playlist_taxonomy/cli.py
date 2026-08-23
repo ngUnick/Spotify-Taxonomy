@@ -1842,16 +1842,21 @@ def research_grounding_preview(
 @research_grounding_acquire_app.command("preview")
 def research_grounding_acquire_preview(
     limit: int = typer.Option(10, "--limit", min=1, max=25),
+    scope: str = typer.Option("all", "--scope", case_sensitive=False, help="Display all research-needed rows or only the eligible fetch batch."),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
     data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
 ) -> None:
     """Project bounded exact-grounding acquisition locally with no I/O or writes."""
     try:
+        if scope not in {"all", "eligible"}:
+            raise ValueError("acquisition preview scope must be either 'all' or 'eligible'")
         config_path = config_path.resolve()
         with _research_store(config_path, data_dir) as (config, _, store):
             if current_schema_version(store.connection) < 18:
                 raise PersistenceError("database requires migration 18; run 'db init'")
-            preview = _research_grounding_acquisition_service(config_path, config, store).preview()
+            service = _research_grounding_acquisition_service(config_path, config, store)
+            preview = service.preview()
+            selected = preview.targets[:limit] if scope == "all" else service.plan(limit)
         reasons = dict(preview.unavailable_reason_counts)
         for name, value in (
             ("research_needed_canonicals", preview.research_needed_canonicals),
@@ -1862,7 +1867,7 @@ def research_grounding_acquire_preview(
             _safe_echo(f"{name}: {value}")
         for reason, value in sorted(reasons.items()):
             _safe_echo(f"unavailable_{reason}: {value}")
-        for item in preview.targets[:limit]:
+        for item in selected:
             _safe_echo(f"canonical_track_id: {item.canonical_track_id}\tacquisition={item.state}\treason={item.reason}")
         _safe_echo("network_access: no\ndatabase_write: no\nspotify_access: no")
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
