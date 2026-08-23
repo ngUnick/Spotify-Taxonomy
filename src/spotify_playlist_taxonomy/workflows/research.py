@@ -29,6 +29,7 @@ from spotify_playlist_taxonomy.ports.research import (
     ResearchResult,
     SubjectMatch,
 )
+from spotify_playlist_taxonomy.workflows.research_grounding import CanonicalExternalSubjectResolver
 
 
 def _canonical_json(value: object) -> str:
@@ -234,6 +235,7 @@ class ResearchCoordinator:
         now: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        subject_resolver: CanonicalExternalSubjectResolver | None = None,
     ):
         self.store = store
         self.providers = {item.descriptor.provider_id: item for item in providers}
@@ -242,6 +244,9 @@ class ResearchCoordinator:
         self.now = now or (lambda: datetime.now(UTC))
         self.monotonic = monotonic
         self.sleep = sleep
+        self.subject_resolver = subject_resolver or CanonicalExternalSubjectResolver(
+            store.connection, now=self.now,
+        )
         self._last_call: dict[str, float] = {}
         self.normalizer = EvidenceNormalizer(
             schema_version=policy.normalized_evidence_schema_version,
@@ -266,12 +271,19 @@ class ResearchCoordinator:
         provider_calls = cache_hits = evidence_created = 0
         for canonical_track_id in canonical_track_ids:
             subject = self.store.subject(canonical_track_id)
+            identifiers = list(subject.independent_identifiers)
+            grounding = self.subject_resolver.resolve(canonical_track_id)
+            if grounding.is_exact and grounding.musicbrainz_recording_id is not None:
+                identifiers.append(IndependentIdentifier(
+                    "musicbrainz_recording", grounding.musicbrainz_recording_id,
+                ))
+            identifiers = list({(item.namespace, item.value): item for item in identifiers}.values())
             fingerprint = subject_fingerprint(
                 canonical_track_id=canonical_track_id,
                 title=subject.track.display_title,
                 artists=subject.track.display_artists,
                 version_cues=subject.version_cues,
-                identifiers=subject.independent_identifiers,
+                identifiers=tuple(identifiers),
             )
             requested_at = _iso(self.now())
             job_id = f"research-job.{uuid.uuid4().hex}"
@@ -282,7 +294,6 @@ class ResearchCoordinator:
                 subject_fingerprint=fingerprint, policy_version=self.policy.policy_version,
                 bundle_digest=self.phase4_bundle_digest, requested_at=requested_at,
             )
-            identifiers = list(subject.independent_identifiers)
             outcomes: list[ProviderOutcomeStatus] = []
             for provider in selected:
                 supported = provider.descriptor.supported_evidence_types

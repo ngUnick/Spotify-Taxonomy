@@ -86,6 +86,10 @@ from spotify_playlist_taxonomy.workflows.research import (
     EvidenceSufficiencyService,
     ResearchCoordinator,
 )
+from spotify_playlist_taxonomy.workflows.research_grounding import (
+    CanonicalExternalSubjectResolver,
+    ResearchGroundingPreviewService,
+)
 from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
@@ -116,6 +120,7 @@ catalogue_match_external_recording_detail_app = typer.Typer(no_args_is_help=True
 catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit canonical identity links.")
 catalogue_classify_app = typer.Typer(no_args_is_help=True, help="Inspect local supervised classification readiness.")
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
+research_grounding_app = typer.Typer(no_args_is_help=True, help="Preview local exact external research-subject grounding.")
 derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characteristics from persisted evidence.")
 classify_app = typer.Typer(no_args_is_help=True, help="Evaluate offline semantic proposals from characteristics.")
 review_app = typer.Typer(no_args_is_help=True, help="Review local semantic proposals without network access.")
@@ -148,6 +153,7 @@ catalogue_match_external_recording_app.add_typer(catalogue_match_external_record
 catalogue_app.add_typer(catalogue_link_app, name="link")
 catalogue_app.add_typer(catalogue_classify_app, name="classify")
 app.add_typer(research_app, name="research")
+research_app.add_typer(research_grounding_app, name="grounding")
 app.add_typer(derive_app, name="derive")
 app.add_typer(classify_app, name="classify")
 app.add_typer(review_app, name="review")
@@ -1737,6 +1743,33 @@ def research_run(
             f"Research complete: jobs={len(summary.job_ids)} provider_calls={summary.provider_calls} "
             f"cache_hits={summary.cache_hits} evidence_created={summary.evidence_created}"
         )
+    except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@research_grounding_app.command("preview")
+def research_grounding_preview(
+    limit: int = typer.Option(10, "--limit", min=1, max=25),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show reusable exact external research-subject coverage without I/O."""
+    try:
+        with _research_store(config_path, data_dir) as (_, _, store):
+            report = ResearchGroundingPreviewService(
+                CanonicalExternalSubjectResolver(store.connection)
+            ).preview(limit)
+        for name in (
+            "canonical_tracks_total", "grounding_exact_canonicals", "grounding_unavailable_canonicals",
+            "no_active_account_context_canonicals", "no_current_spotify_identity_canonicals",
+            "missing_external_evidence_canonicals", "stale_external_evidence_canonicals",
+            "nonresolved_external_evidence_canonicals", "invalid_recording_id_canonicals",
+            "resolved_disagreement_canonicals",
+        ):
+            _safe_echo(f"{name}: {getattr(report, name)}")
+        for item in report.selected:
+            _safe_echo(f"canonical_track_id: {item.canonical_track_id}\tgrounding={item.state}\treason={item.reason}")
+        _safe_echo("network_access: no\ndatabase_write: no")
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
 
