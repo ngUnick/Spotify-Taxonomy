@@ -97,6 +97,11 @@ from spotify_playlist_taxonomy.workflows.research_grounding_acquisition import (
 from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 from spotify_playlist_taxonomy.workflows.phase7_batch import ReviewBatchValidationError, parse_review_batch
+from spotify_playlist_taxonomy.workflows.genre_routing import (
+    GenreRoutingBatchValidationError,
+    GenreRoutingService,
+    parse_genre_routing_batch,
+)
 from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
 from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 from spotify_playlist_taxonomy.workflows.phase10 import Phase10Service, ProvisioningError, RecoveryRequiredError
@@ -131,6 +136,8 @@ derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characterist
 classify_app = typer.Typer(no_args_is_help=True, help="Evaluate offline semantic proposals from characteristics.")
 review_app = typer.Typer(no_args_is_help=True, help="Review local semantic proposals without network access.")
 review_batch_app = typer.Typer(no_args_is_help=True, help="Import bounded local explicit human review decisions.")
+routing_app = typer.Typer(no_args_is_help=True, help="Manage local explicit Genre output-routing decisions.")
+routing_batch_app = typer.Typer(no_args_is_help=True, help="Import bounded local explicit human Genre-routing decisions.")
 calibration_app = typer.Typer(no_args_is_help=True, help="Report observational local calibration.")
 codex_app = typer.Typer(no_args_is_help=True, help="Supervised offline Codex file exchange.")
 codex_batch_app = typer.Typer(no_args_is_help=True, help="Create and inspect outbound batches.")
@@ -166,6 +173,8 @@ app.add_typer(derive_app, name="derive")
 app.add_typer(classify_app, name="classify")
 app.add_typer(review_app, name="review")
 review_app.add_typer(review_batch_app, name="batch")
+app.add_typer(routing_app, name="routing")
+routing_app.add_typer(routing_batch_app, name="batch")
 app.add_typer(calibration_app, name="calibration")
 app.add_typer(codex_app, name="codex")
 codex_app.add_typer(codex_batch_app, name="batch")
@@ -369,6 +378,23 @@ def _phase7_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase7
     finally:
         connection.close()
 
+
+@contextmanager
+def _genre_routing_service(config_path: Path, data_dir: Path | None) -> Iterator[GenreRoutingService]:
+    config_path = config_path.resolve()
+    config, _, _ = _load_documents(config_path)
+    paths = _paths(config, data_dir)
+    if not paths.database_path.is_file():
+        raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 19:
+            raise PersistenceError("database requires migration 19; run 'db init'")
+        yield GenreRoutingService(connection, load_phase4_bundle(config_path))
+    finally:
+        connection.close()
+
 @contextmanager
 def _phase8_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase8Service]:
     config_path=config_path.resolve(); config,_,_=_load_documents(config_path); paths=_paths(config,data_dir)
@@ -387,7 +413,7 @@ def _phase9_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase9
     connection = connect_database(paths.database_path)
     try:
         assert_integrity(connection)
-        if current_schema_version(connection) < 8: raise PersistenceError("database requires migration 8; run 'db init'")
+        if current_schema_version(connection) < 19: raise PersistenceError("database requires migration 19; run 'db init'")
         yield Phase9Service(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
@@ -410,7 +436,7 @@ def _phase11_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase
     connection = connect_database(paths.database_path)
     try:
         assert_integrity(connection)
-        if current_schema_version(connection) < 14: raise PersistenceError("database requires migration 14; run 'db init'")
+        if current_schema_version(connection) < 19: raise PersistenceError("database requires migration 19; run 'db init'")
         yield Phase11Service(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
@@ -421,7 +447,7 @@ def _phase12_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase
     connection = connect_database(paths.database_path)
     try:
         assert_integrity(connection)
-        if current_schema_version(connection) < 14: raise PersistenceError("database requires migration 14; run 'db init'")
+        if current_schema_version(connection) < 19: raise PersistenceError("database requires migration 19; run 'db init'")
         yield Phase12Service(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
@@ -2146,6 +2172,50 @@ def review_batch_import(
             f"abstain: {outcome.abstain_count}\nstatus: applied"
         )
     except (OSError, ValueError, ValidationError, PersistenceError, ReviewBatchValidationError) as error:
+        _fail(error)
+
+
+@routing_batch_app.command("import")
+def routing_batch_import(
+    batch_file: Path = typer.Argument(..., exists=True, dir_okay=False),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Atomically import 1-25 local explicit Greek/Foreign routing decisions."""
+    try:
+        try:
+            raw = json.loads(batch_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            raise ValueError("genre routing batch file is unreadable or invalid JSON") from None
+        decisions = parse_genre_routing_batch(raw)
+        with _genre_routing_service(config_path, data_dir) as service:
+            outcome = service.apply_batch(decisions)
+        _safe_echo(
+            f"batch_decisions: {outcome.decision_count}\n"
+            f"canonical_tracks: {outcome.canonical_track_count}\n"
+            f"greek: {outcome.greek_count}\nforeign: {outcome.foreign_count}\nstatus: applied"
+        )
+    except (OSError, ValueError, ValidationError, PersistenceError, GenreRoutingBatchValidationError) as error:
+        _fail(error)
+
+
+@routing_app.command("show")
+def routing_show(
+    canonical_id: str = typer.Argument(...),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show local explicit Genre-routing state without provider access."""
+    try:
+        with _genre_routing_service(config_path, data_dir) as service:
+            item = service.show(canonical_id)
+        _safe_echo(
+            f"canonical_track_id: {item.canonical_track_id}\nexplicit_route: {item.route.value if item.route else '-'}\n"
+            f"state: {item.state}\nprovenance: {item.provenance or '-'}\n"
+            f"routing_policy_version: {item.routing_policy_version or '-'}\n"
+            f"bundle_digest: {item.bundle_digest or '-'}"
+        )
+    except (OSError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
 
 

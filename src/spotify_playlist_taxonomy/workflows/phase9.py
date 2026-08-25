@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from spotify_playlist_taxonomy.config import Phase4Bundle, RoutingOutcome
+from spotify_playlist_taxonomy.workflows.genre_routing import GenreRoutingService
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 
 
@@ -73,6 +74,7 @@ class Phase9Service:
         self.connection = connection
         self.bundle = bundle
         self.review = Phase7Service(connection, bundle)
+        self.genre_routing = GenreRoutingService(connection, bundle)
         self.specifications = {item.logical_playlist_id: item for item in bundle.specifications}
         self.targets = {
             (item.logical_playlist_id, None if item.variant_id is None else item.variant_id.value): item
@@ -181,6 +183,9 @@ class Phase9Service:
     def _route_genre(
         self, canonical_track_id: str, values: dict[str, str] | None = None,
     ) -> tuple[RoutingOutcome, str]:
+        explicit = self.genre_routing.show(canonical_track_id)
+        if explicit.state == "current" and explicit.route is not None:
+            return explicit.route, f"explicit human genre routing: {explicit.route.value}"
         values = self._routing_values(canonical_track_id) if values is None else values
         refs = self.bundle.genre_variant_routing.characteristic_references
         lexical = values.get(refs.lyrical_language_profile)

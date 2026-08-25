@@ -125,6 +125,11 @@ For a bounded local explicit-review import, use JSON such as
 The import accepts 1–25 decisions and writes ordinary Phase 7 explicit review events transactionally; it does
 not contact Spotify or any provider.
 
+For explicit Genre output routing without classifying Genre, use `spotify-taxonomy routing batch import ROUTING_BATCH.json` with
+`{"schema":"genre-routing-batch.v1","decisions":[{"canonical_id":"canonical.synthetic.example","route":"foreign","note":"optional human note"}]}`.
+It accepts 1–25 canonical-specific `greek|foreign` decisions atomically. Inspect the current local state with
+`spotify-taxonomy routing show CANONICAL_ID`; routing affects a desired target only after an effective Genre include.
+
 Catalogue review commands are local and scoped to the active account binding. They deliberately show only
 the concise title, ordered artists, version cue, candidate basis, and link state needed for an interactive
 decision; routine logs and automated reports do not receive that metadata.
