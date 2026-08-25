@@ -96,6 +96,7 @@ from spotify_playlist_taxonomy.workflows.research_grounding_acquisition import (
 )
 from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
+from spotify_playlist_taxonomy.workflows.phase7_batch import ReviewBatchValidationError, parse_review_batch
 from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
 from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 from spotify_playlist_taxonomy.workflows.phase10 import Phase10Service, ProvisioningError, RecoveryRequiredError
@@ -129,6 +130,7 @@ research_grounding_acquire_app = typer.Typer(no_args_is_help=True, help="Bounded
 derive_app = typer.Typer(no_args_is_help=True, help="Derive offline characteristics from persisted evidence.")
 classify_app = typer.Typer(no_args_is_help=True, help="Evaluate offline semantic proposals from characteristics.")
 review_app = typer.Typer(no_args_is_help=True, help="Review local semantic proposals without network access.")
+review_batch_app = typer.Typer(no_args_is_help=True, help="Import bounded local explicit human review decisions.")
 calibration_app = typer.Typer(no_args_is_help=True, help="Report observational local calibration.")
 codex_app = typer.Typer(no_args_is_help=True, help="Supervised offline Codex file exchange.")
 codex_batch_app = typer.Typer(no_args_is_help=True, help="Create and inspect outbound batches.")
@@ -163,6 +165,7 @@ research_grounding_app.add_typer(research_grounding_acquire_app, name="acquire")
 app.add_typer(derive_app, name="derive")
 app.add_typer(classify_app, name="classify")
 app.add_typer(review_app, name="review")
+review_app.add_typer(review_batch_app, name="batch")
 app.add_typer(calibration_app, name="calibration")
 app.add_typer(codex_app, name="codex")
 codex_app.add_typer(codex_batch_app, name="batch")
@@ -2118,6 +2121,32 @@ def review_clear(canonical_id: str = typer.Argument(...), semantic_id: str = typ
         with _phase7_service(config_path, data_dir) as service: item = service.clear(canonical_id, semantic_id)
         _render_effective(item)
     except (OSError, LookupError, ValueError, ValidationError, PersistenceError) as error: _fail(error)
+
+
+@review_batch_app.command("import")
+def review_batch_import(
+    batch_file: Path = typer.Argument(..., exists=True, dir_okay=False),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Atomically import 1-25 local explicit Phase 7 review decisions."""
+    try:
+        try:
+            raw = json.loads(batch_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            raise ValueError("review batch file is unreadable or invalid JSON") from None
+        decisions = parse_review_batch(raw)
+        with _phase7_service(config_path, data_dir) as service:
+            outcome = service.apply_batch(decisions)
+        _safe_echo(
+            f"batch_decisions: {outcome.decision_count}\n"
+            f"canonical_tracks: {outcome.canonical_track_count}\n"
+            f"include: {outcome.include_count}\n"
+            f"exclude: {outcome.exclude_count}\n"
+            f"abstain: {outcome.abstain_count}\nstatus: applied"
+        )
+    except (OSError, ValueError, ValidationError, PersistenceError, ReviewBatchValidationError) as error:
+        _fail(error)
 
 
 @review_app.command("history")

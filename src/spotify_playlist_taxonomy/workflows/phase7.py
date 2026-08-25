@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from spotify_playlist_taxonomy.config import Phase4Bundle
 from spotify_playlist_taxonomy.domain.models import AssignmentDecision
 from spotify_playlist_taxonomy.persistence.database import utc_now
+from spotify_playlist_taxonomy.workflows.phase7_batch import ReviewBatchDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,15 @@ class EffectiveReview:
     stale: bool
     generated_sources: tuple[str, ...] = ()
     generated_disagreement: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class BatchReviewOutcome:
+    decision_count: int
+    canonical_track_count: int
+    include_count: int
+    exclude_count: int
+    abstain_count: int
 
 
 class Phase7Service:
@@ -119,14 +129,57 @@ class Phase7Service:
     def decide(
         self, canonical_id: str, logical_id: str, decision: AssignmentDecision, note: str | None = None
     ) -> EffectiveReview:
+        self._validate_decision(canonical_id, logical_id, note)
+        changed = self._record_decision(canonical_id, logical_id, decision, note)
+        if changed:
+            self.connection.commit()
+        return self.effective(canonical_id, logical_id)
+
+    def apply_batch(self, decisions: tuple[ReviewBatchDecision, ...]) -> BatchReviewOutcome:
+        """Atomically apply bounded explicit decisions through the ordinary Phase 7 event path."""
+
+        if not decisions or len(decisions) > 25:
+            raise ValueError("review batch requires 1-25 decisions")
+        seen: set[tuple[str, str]] = set()
+        for item in decisions:
+            pair = (item.canonical_id, item.semantic_id)
+            if pair in seen:
+                raise ValueError("review batch contains duplicate canonical/semantic decisions")
+            seen.add(pair)
+            self._validate_decision(item.canonical_id, item.semantic_id, item.note)
+        try:
+            self.connection.execute("BEGIN IMMEDIATE")
+            for item in decisions:
+                self._record_decision(item.canonical_id, item.semantic_id, item.decision, item.note)
+            self.connection.commit()
+        except sqlite3.Error as error:
+            self.connection.rollback()
+            raise ValueError("review batch could not be applied") from error
+        return BatchReviewOutcome(
+            len(decisions), len({item.canonical_id for item in decisions}),
+            sum(item.decision is AssignmentDecision.INCLUDE for item in decisions),
+            sum(item.decision is AssignmentDecision.EXCLUDE for item in decisions),
+            sum(item.decision is AssignmentDecision.ABSTAIN for item in decisions),
+        )
+
+    def _validate_decision(self, canonical_id: str, logical_id: str, note: str | None) -> None:
         spec = self.specifications.get(logical_id)
         if spec is None:
             raise ValueError("unknown reviewed semantic specification")
         if note is not None and (not note.strip() or len(note) > 280):
             raise ValueError("note must be nonblank and <= 280 characters")
+        if not self.connection.execute(
+            "SELECT 1 FROM canonical_tracks WHERE canonical_track_id=?", (canonical_id,)
+        ).fetchone():
+            raise ValueError("unknown canonical ID")
+
+    def _record_decision(
+        self, canonical_id: str, logical_id: str, decision: AssignmentDecision, note: str | None,
+    ) -> bool:
+        spec = self.specifications[logical_id]
         current = self._latest_event(canonical_id, logical_id)
         if current is not None and current["action"] == "decide" and current["decision"] == decision.value and current["specification_version"] == spec.specification_version and current["note"] == note:
-            return self.effective(canonical_id, logical_id)
+            return False
         proposals = self._generated(canonical_id, logical_id)
         deterministic = next((proposal for proposal in proposals if proposal["source"] == "deterministic"), None)
         self.connection.execute(
@@ -138,8 +191,7 @@ class Phase7Service:
                 self.bundle.digest, note, utc_now(),
             ),
         )
-        self.connection.commit()
-        return self.effective(canonical_id, logical_id)
+        return True
 
     def clear(self, canonical_id: str, logical_id: str) -> EffectiveReview:
         current = self._latest_event(canonical_id, logical_id)

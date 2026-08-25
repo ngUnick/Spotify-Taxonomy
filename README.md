@@ -116,7 +116,14 @@ spotify-taxonomy research grounding acquire preview --limit 10
 spotify-taxonomy research grounding acquire fetch --network --limit 10
 spotify-taxonomy research show CANONICAL_ID
 spotify-taxonomy research status [CANONICAL_ID]
+spotify-taxonomy review decide CANONICAL_ID SEMANTIC_ID include
+spotify-taxonomy review batch import REVIEW_BATCH.json
 ```
+
+For a bounded local explicit-review import, use JSON such as
+`{"schema":"phase7-review-batch.v1","decisions":[{"canonical_id":"canonical.synthetic.example","semantic_id":"vibe.chill","decision":"include","note":"optional human note"}]}`.
+The import accepts 1–25 decisions and writes ordinary Phase 7 explicit review events transactionally; it does
+not contact Spotify or any provider.
 
 Catalogue review commands are local and scoped to the active account binding. They deliberately show only
 the concise title, ordered artists, version cue, candidate basis, and link state needed for an interactive
