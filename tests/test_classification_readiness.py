@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 from spotify_playlist_taxonomy.cli import app
 from spotify_playlist_taxonomy.config import load_phase4_bundle
 from spotify_playlist_taxonomy.domain.models import (
-    CanonicalTrack, CanonicalTrackIdentityLink, EvidenceKind, IdentityProvider,
+    AssignmentDecision, CanonicalTrack, CanonicalTrackIdentityLink, EvidenceKind, IdentityProvider,
     PlatformTrackIdentity, ResearchEvidence, ResearchSource,
 )
 from spotify_playlist_taxonomy.domain.research import EvidenceType
@@ -23,6 +23,7 @@ from spotify_playlist_taxonomy.ports.research import ProviderDescriptor
 from spotify_playlist_taxonomy.workflows.classification_readiness import (
     ClassificationReadinessService, ReadinessBucket,
 )
+from spotify_playlist_taxonomy.workflows.genre_routing import GenreRoutingService, parse_genre_routing_batch
 from spotify_playlist_taxonomy.workflows.research import (
     EvidenceSufficiencyService, ResearchActionabilityService,
 )
@@ -260,6 +261,26 @@ class ClassificationReadinessTests(unittest.TestCase):
         self.assertEqual(5, offline.spotify_mapping_account_context_unavailable_canonicals)
         self.assertEqual(0, offline.spotify_population_eligible_canonicals)
 
+    def test_local_worklist_exposes_titles_mapping_and_explicit_human_state_without_candidates(self) -> None:
+        safe = self._canonical("worklist_safe", mapping=True)
+        multiple = self._canonical("worklist_multiple", mapping=True)
+        self._account_link(multiple, "worklist_multiple_two")
+        self.service.review.decide(safe, "vibe.chill", AssignmentDecision.INCLUDE)
+        GenreRoutingService(self.connection, self.bundle).apply_batch(parse_genre_routing_batch({
+            "schema": "genre-routing-batch.v1", "decisions": [{"canonical_id": safe, "route": "foreign"}],
+        }))
+        before = self.connection.total_changes
+        items = self.service.worklist(100)
+        self.assertEqual(before, self.connection.total_changes)
+        states = {item.canonical_track_id: item for item in items}
+        self.assertEqual("safe", states[safe].population_mapping_state)
+        self.assertEqual("blocked_multiple", states[multiple].population_mapping_state)
+        self.assertEqual("Synthetic worklist_safe", states[safe].title)
+        self.assertEqual(("Invented",), states[safe].artists)
+        self.assertTrue(states[safe].explicit_review_exists)
+        self.assertEqual("current", states[safe].explicit_genre_routing_state)
+        self.assertEqual((multiple,), tuple(item.canonical_track_id for item in self.service.worklist(100, unreviewed_only=True)))
+
     def test_cli_is_read_only_offline_and_renders_selected_population_targets(self) -> None:
         data_dir = Path(self.temp.name) / "runtime"
         runner = CliRunner()
@@ -282,9 +303,13 @@ class ClassificationReadinessTests(unittest.TestCase):
         before = tuple(connection.iterdump()); connection.close(); del connection; gc.collect()
         with patch("socket.socket.connect", side_effect=AssertionError("network attempted")):
             result = runner.invoke(app, ["catalogue", "classify", "readiness", "--limit", "1", "--config", str(CONFIG), "--data-dir", str(data_dir)])
+            worklist = runner.invoke(app, ["catalogue", "classify", "worklist", "--limit", "1", "--unreviewed-only", "--config", str(CONFIG), "--data-dir", str(data_dir)])
         self.assertEqual(0, result.exit_code, result.output)
         self.assertIn("selected_action: population", result.output)
         self.assertIn("selected_desired_target_ids: output.vibe.chill", result.output)
+        self.assertEqual(0, worklist.exit_code, worklist.output)
+        self.assertIn("canonical_id=canonical.synthetic.cli.ready", worklist.output)
+        self.assertIn("population_mapping=safe", worklist.output)
         connection = connect_database(data_dir / "state" / "app.db")
         self.assertEqual(before, tuple(connection.iterdump())); connection.close(); del connection; gc.collect()
 

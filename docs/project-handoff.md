@@ -24,15 +24,19 @@ memberships. Managed Genre, Vibe, and Activity targets have been provisioned as 
 
 ## Latest features
 
-- `spotify-taxonomy review batch import <FILE>` imports 1–25 fully validated, atomic Phase 7 explicit human
+- `spotify-taxonomy review batch import <FILE>` imports 1–250 fully validated, atomic Phase 7 explicit human
   decisions in `phase7-review-batch.v1` format. It uses the same review-event, precedence, history, and
   idempotence rules as individual review decisions.
-- `spotify-taxonomy routing batch import <FILE>` imports 1–25 fully validated, atomic explicit `greek` or
+- `spotify-taxonomy routing batch import <FILE>` imports 1–250 fully validated, atomic explicit `greek` or
   `foreign` Genre-routing decisions in `genre-routing-batch.v1` format. `spotify-taxonomy routing show
   <CANONICAL_ID>` reports its local current state.
 - Explicit Genre routing is canonical-recording scoped and takes precedence over current derived routing.
   It is separate from semantic classification: it is consulted only after an effective included `genre.*`
   decision and cannot create Genre membership by itself.
+- `catalogue classify worklist --limit 1..100 --unreviewed-only` is a local account-scoped selection surface.
+  `populate batch preview CANONICAL_ID...` and `populate batch apply CANONICAL_ID... --confirm APPLY:PLAN_ID`
+  make a bounded up-to-100-canonical population run practical while retaining the existing per-track attempt,
+  provider read-back, recovery, and fail-closed mapping guarantees.
 
 ## Current execution direction
 

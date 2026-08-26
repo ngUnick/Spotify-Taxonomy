@@ -14,6 +14,7 @@ from spotify_playlist_taxonomy.domain.models import AssignmentDecision, Canonica
 from spotify_playlist_taxonomy.persistence import SQLiteStateStore, apply_migrations, connect_database, current_schema_version, sync_taxonomy
 from spotify_playlist_taxonomy.persistence.database import load_migrations, utc_now
 from spotify_playlist_taxonomy.workflows.genre_routing import (
+    ROUTING_BATCH_MAX_DECISIONS,
     ROUTING_BATCH_SCHEMA_VERSION,
     GenreRoutingBatchValidationError,
     GenreRoutingService,
@@ -109,9 +110,15 @@ class GenreRoutingTests(unittest.TestCase):
                 with self.assertRaises((GenreRoutingBatchValidationError, ValueError)):
                     self.routing.apply_batch(parse_genre_routing_batch(document))
                 self.assertEqual(before, self._count())
+        accepted = self._document(*[
+            {"canonical_id": f"canonical.synthetic.{index}", "route": "greek"}
+            for index in range(ROUTING_BATCH_MAX_DECISIONS)
+        ])
+        self.assertEqual(ROUTING_BATCH_MAX_DECISIONS, len(parse_genre_routing_batch(accepted)))
         with self.assertRaises(GenreRoutingBatchValidationError):
             parse_genre_routing_batch(self._document(*[
-                {"canonical_id": f"canonical.synthetic.{index}", "route": "greek"} for index in range(26)
+                {"canonical_id": f"canonical.synthetic.{index}", "route": "greek"}
+                for index in range(ROUTING_BATCH_MAX_DECISIONS + 1)
             ]))
 
     def test_database_failure_rolls_back_entire_batch(self) -> None:

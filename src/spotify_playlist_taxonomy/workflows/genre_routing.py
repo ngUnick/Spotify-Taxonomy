@@ -14,6 +14,7 @@ from spotify_playlist_taxonomy.persistence.database import utc_now
 
 
 ROUTING_BATCH_SCHEMA_VERSION = "genre-routing-batch.v1"
+ROUTING_BATCH_MAX_DECISIONS = 250
 
 
 class GenreRoutingBatchValidationError(ValueError):
@@ -59,7 +60,7 @@ class _BatchDecision(_StrictModel):
 
 class _BatchDocument(_StrictModel):
     schema_version: str = Field(alias="schema")
-    decisions: list[_BatchDecision] = Field(min_length=1, max_length=25)
+    decisions: list[_BatchDecision] = Field(min_length=1, max_length=ROUTING_BATCH_MAX_DECISIONS)
 
     @field_validator("schema_version")
     @classmethod
@@ -130,8 +131,8 @@ class GenreRoutingService:
         )
 
     def apply_batch(self, decisions: tuple[GenreRoutingBatchDecision, ...]) -> GenreRoutingBatchOutcome:
-        if not decisions or len(decisions) > 25:
-            raise ValueError("genre routing batch requires 1-25 decisions")
+        if not decisions or len(decisions) > ROUTING_BATCH_MAX_DECISIONS:
+            raise ValueError(f"genre routing batch requires 1-{ROUTING_BATCH_MAX_DECISIONS} decisions")
         if len({item.canonical_id for item in decisions}) != len(decisions):
             raise ValueError("genre routing batch contains duplicate canonical decisions")
         for item in decisions:

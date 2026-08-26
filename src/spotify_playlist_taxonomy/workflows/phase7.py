@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from spotify_playlist_taxonomy.config import Phase4Bundle
 from spotify_playlist_taxonomy.domain.models import AssignmentDecision
 from spotify_playlist_taxonomy.persistence.database import utc_now
-from spotify_playlist_taxonomy.workflows.phase7_batch import ReviewBatchDecision
+from spotify_playlist_taxonomy.workflows.phase7_batch import BATCH_MAX_DECISIONS, ReviewBatchDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,8 +138,8 @@ class Phase7Service:
     def apply_batch(self, decisions: tuple[ReviewBatchDecision, ...]) -> BatchReviewOutcome:
         """Atomically apply bounded explicit decisions through the ordinary Phase 7 event path."""
 
-        if not decisions or len(decisions) > 25:
-            raise ValueError("review batch requires 1-25 decisions")
+        if not decisions or len(decisions) > BATCH_MAX_DECISIONS:
+            raise ValueError(f"review batch requires 1-{BATCH_MAX_DECISIONS} decisions")
         seen: set[tuple[str, str]] = set()
         for item in decisions:
             pair = (item.canonical_id, item.semantic_id)

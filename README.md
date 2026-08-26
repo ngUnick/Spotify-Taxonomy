@@ -123,13 +123,23 @@ spotify-taxonomy review batch import REVIEW_BATCH.json
 
 For a bounded local explicit-review import, use JSON such as
 `{"schema":"phase7-review-batch.v1","decisions":[{"canonical_id":"canonical.synthetic.example","semantic_id":"vibe.chill","decision":"include","note":"optional human note"}]}`.
-The import accepts 1–25 decisions and writes ordinary Phase 7 explicit review events transactionally; it does
+The import accepts 1–250 decisions and writes ordinary Phase 7 explicit review events transactionally; it does
 not contact Spotify or any provider.
 
 For explicit Genre output routing without classifying Genre, use `spotify-taxonomy routing batch import ROUTING_BATCH.json` with
 `{"schema":"genre-routing-batch.v1","decisions":[{"canonical_id":"canonical.synthetic.example","route":"foreign","note":"optional human note"}]}`.
-It accepts 1–25 canonical-specific `greek|foreign` decisions atomically. Inspect the current local state with
+It accepts 1–250 canonical-specific `greek|foreign` decisions atomically. Inspect the current local state with
 `spotify-taxonomy routing show CANONICAL_ID`; routing affects a desired target only after an effective Genre include.
+
+For practical supervised batches, first inspect up to 100 local rows with
+`spotify-taxonomy catalogue classify worklist --limit 100 --unreviewed-only`. After importing the explicit
+review and any necessary routing decisions, run `spotify-taxonomy populate batch preview CANONICAL_ID...`.
+It prints a deterministic `batch_plan_id` and runs the same live exact-ID preflight as one-track population for
+every current desired membership. Apply that bounded plan with
+`spotify-taxonomy populate batch apply CANONICAL_ID... --confirm APPLY:BATCH_PLAN_ID`.
+Apply re-runs preflight, writes one track at a time through the existing guarded path, verifies each write by
+read-back, skips blocked/already-present entries, and stops after an ambiguous outbound result. It never removes,
+reorders, replaces, adopts a playlist by name, or repairs an ambiguous mapping automatically.
 
 Catalogue review commands are local and scoped to the active account binding. They deliberately show only
 the concise title, ordered artists, version cue, candidate basis, and link state needed for an interactive

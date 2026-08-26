@@ -14,6 +14,7 @@ from spotify_playlist_taxonomy.domain.models import AssignmentDecision, Canonica
 from spotify_playlist_taxonomy.persistence import SQLiteStateStore, apply_migrations, connect_database, sync_taxonomy
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 from spotify_playlist_taxonomy.workflows.phase7_batch import (
+    BATCH_MAX_DECISIONS,
     BATCH_SCHEMA_VERSION,
     ReviewBatchValidationError,
     parse_review_batch,
@@ -113,9 +114,14 @@ class Phase7BatchReviewTests(unittest.TestCase):
                 else:
                     self.fail("invalid batch was accepted")
                 self.assertEqual(before, self._count_events())
+        accepted = self._document(*[
+            {"canonical_id": self.first, "semantic_id": f"synthetic.semantic.{index}", "decision": "include"}
+            for index in range(BATCH_MAX_DECISIONS)
+        ])
+        self.assertEqual(BATCH_MAX_DECISIONS, len(parse_review_batch(accepted)))
         too_many = self._document(*[
             {"canonical_id": self.first, "semantic_id": f"vibe.chill.{index}", "decision": "include"}
-            for index in range(26)
+            for index in range(BATCH_MAX_DECISIONS + 1)
         ])
         with self.assertRaises(ReviewBatchValidationError):
             parse_review_batch(too_many)

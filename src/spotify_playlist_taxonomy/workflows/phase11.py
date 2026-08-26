@@ -4,6 +4,8 @@ from __future__ import annotations
 import re
 import sqlite3
 import uuid
+from hashlib import sha256
+import json
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -18,6 +20,8 @@ from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 
 _SPOTIFY_ID = re.compile(r"^[A-Za-z0-9]+$")
 _UNRESOLVED = ("started", "recovery_required")
+BATCH_POPULATION_MAX_CANONICALS = 100
+BATCH_POPULATION_PLAN_VERSION = "population-batch.v1"
 
 
 class ManagedTrackAdder(Protocol):
@@ -88,6 +92,30 @@ class PopulationStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class BatchPopulationPreview:
+    plan_id: str
+    canonical_track_ids: tuple[str, ...]
+    entries: tuple[PopulationStatus, ...]
+
+    @property
+    def desired_memberships(self) -> int:
+        return len(self.entries)
+
+    def count(self, state: str) -> int:
+        return sum(item.state == state for item in self.entries)
+
+
+@dataclass(frozen=True, slots=True)
+class BatchPopulationOutcome:
+    plan_id: str
+    canonical_track_ids: tuple[str, ...]
+    entries: tuple[PopulationStatus, ...]
+
+    def count(self, state: str) -> int:
+        return sum(item.state == state for item in self.entries)
+
+
+@dataclass(frozen=True, slots=True)
 class _Preflight:
     target_id: str
     canonical_id: str
@@ -128,6 +156,81 @@ class Phase11Service:
         if self._unresolved(target_id, canonical_id) is not None:
             return PopulationStatus(target_id, canonical_id, "recovery_required", "an earlier addition outcome is unresolved; automatic retry is disabled", 0, item.required_scopes)
         return PopulationStatus(target_id, canonical_id, "would_add", "one exact provider track would be appended to the exact managed playlist", 0, item.required_scopes)
+
+    def batch_plan_id(self, canonical_ids: tuple[str, ...]) -> str:
+        """Return a deterministic local plan identity; this performs no provider I/O or writes."""
+
+        canonical_ids = self._batch_canonical_ids(canonical_ids)
+        memberships = tuple(
+            (state.canonical_track_id, item.output_target_id)
+            for state in self.phase9.desired_many(canonical_ids)
+            for item in state.memberships
+        )
+        payload = json.dumps(
+            {
+                "version": BATCH_POPULATION_PLAN_VERSION,
+                "canonical_ids": canonical_ids,
+                "memberships": memberships,
+                "taxonomy_version": self.bundle.taxonomy.taxonomy_version,
+                "bundle_digest": self.bundle.digest,
+            },
+            separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+        return sha256(payload).hexdigest()[:16]
+
+    def batch_preview(self, canonical_ids: tuple[str, ...], *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader) -> BatchPopulationPreview:
+        """Run the ordinary exact live preflight for every current desired membership."""
+
+        canonical_ids = self._batch_canonical_ids(canonical_ids)
+        plan_id = self.batch_plan_id(canonical_ids)
+        entries = tuple(
+            self.preview(membership.output_target_id, state.canonical_track_id,
+                         account_binding_id=account_binding_id, account_id=account_id,
+                         scopes=scopes, reader=reader)
+            for state in self.phase9.desired_many(canonical_ids)
+            for membership in state.memberships
+        )
+        return BatchPopulationPreview(plan_id, canonical_ids, entries)
+
+    def batch_apply(self, canonical_ids: tuple[str, ...], confirmation: str, *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader, adder: ManagedTrackAdder) -> BatchPopulationOutcome:
+        """Revalidate a bounded batch, then preserve the existing one-track guarded write path."""
+
+        canonical_ids = self._batch_canonical_ids(canonical_ids)
+        expected_plan_id = self.batch_plan_id(canonical_ids)
+        if confirmation != f"APPLY:{expected_plan_id}":
+            raise PopulationError("explicit confirmation must equal APPLY:<batch-plan-id>")
+        preview = self.batch_preview(
+            canonical_ids, account_binding_id=account_binding_id, account_id=account_id,
+            scopes=scopes, reader=reader,
+        )
+        entries: list[PopulationStatus] = []
+        pending = list(preview.entries)
+        while pending:
+            item = pending.pop(0)
+            if item.state != "would_add":
+                entries.append(item)
+                continue
+            try:
+                # `apply` records its attempt before the outbound request and verifies read-back afterwards.
+                entries.append(self.apply(
+                    item.output_target_id, item.canonical_track_id,
+                    f"ADD:{item.output_target_id}:{item.canonical_track_id}",
+                    account_binding_id=account_binding_id, account_id=account_id,
+                    scopes=scopes, reader=reader, adder=adder,
+                ))
+            except PopulationRecoveryRequired as error:
+                entries.append(PopulationStatus(item.output_target_id, item.canonical_track_id, "recovery_required", str(error)))
+                entries.extend(
+                    PopulationStatus(next_item.output_target_id, next_item.canonical_track_id, "not_attempted",
+                                     "not attempted after an ambiguous outbound addition; recovery verification is required")
+                    for next_item in pending if next_item.state == "would_add"
+                )
+                entries.extend(next_item for next_item in pending if next_item.state != "would_add")
+                break
+            except PopulationError as error:
+                # A definitively rejected request remains isolated; unrelated safe items may proceed.
+                entries.append(PopulationStatus(item.output_target_id, item.canonical_track_id, "blocked", str(error)))
+        return BatchPopulationOutcome(preview.plan_id, canonical_ids, tuple(entries))
 
     def apply(self, target_id: str, canonical_id: str, confirmation: str, *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader, adder: ManagedTrackAdder) -> PopulationStatus:
         if confirmation != f"ADD:{target_id}:{canonical_id}":
@@ -251,6 +354,16 @@ class Phase11Service:
     def _canonical(self, canonical_id: str) -> None:
         if self.connection.execute("SELECT 1 FROM canonical_tracks WHERE canonical_track_id=?", (canonical_id,)).fetchone() is None:
             raise PopulationError("unknown canonical track")
+
+    def _batch_canonical_ids(self, canonical_ids: tuple[str, ...]) -> tuple[str, ...]:
+        if not canonical_ids or len(canonical_ids) > BATCH_POPULATION_MAX_CANONICALS:
+            raise PopulationError(f"batch population requires 1-{BATCH_POPULATION_MAX_CANONICALS} distinct canonical IDs")
+        if len(set(canonical_ids)) != len(canonical_ids):
+            raise PopulationError("batch population contains duplicate canonical IDs")
+        values = tuple(sorted(canonical_ids))
+        for canonical_id in values:
+            self._canonical(canonical_id)
+        return values
 
     def _unresolved(self, target_id: str, canonical_id: str):
         return self.connection.execute("SELECT * FROM managed_target_addition_attempts WHERE output_target_id=? AND canonical_track_id=? AND state IN ('started', 'recovery_required') ORDER BY created_at DESC LIMIT 1", (target_id, canonical_id)).fetchone()

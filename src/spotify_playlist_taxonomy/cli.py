@@ -147,6 +147,7 @@ managed_app = typer.Typer(no_args_is_help=True, help="Provision one registered n
 managed_provision_app = typer.Typer(no_args_is_help=True, help="Preview or explicitly apply managed playlist provisioning.")
 managed_recovery_app = typer.Typer(no_args_is_help=True, help="Explicitly preserve and abandon unknown provisioning attempts.")
 populate_app = typer.Typer(no_args_is_help=True, help="Guarded one-track addition to an exact managed playlist.")
+populate_batch_app = typer.Typer(no_args_is_help=True, help="Guarded bounded population of current desired memberships.")
 populate_recovery_app = typer.Typer(no_args_is_help=True, help="Read-only verification of unresolved managed additions.")
 cycle_app = typer.Typer(no_args_is_help=True, help="Local-only V1 operational status.")
 app.add_typer(config_app, name="config")
@@ -184,6 +185,7 @@ app.add_typer(managed_app, name="managed")
 managed_app.add_typer(managed_provision_app, name="provision")
 managed_app.add_typer(managed_recovery_app, name="recovery")
 app.add_typer(populate_app, name="populate")
+populate_app.add_typer(populate_batch_app, name="batch")
 populate_app.add_typer(populate_recovery_app, name="recovery")
 app.add_typer(cycle_app, name="cycle")
 
@@ -1272,6 +1274,31 @@ def catalogue_classify_readiness(
         _fail(error)
 
 
+@catalogue_classify_app.command("worklist")
+def catalogue_classify_worklist(
+    limit: int = typer.Option(25, "--limit", min=1, max=100),
+    unreviewed_only: bool = typer.Option(False, "--unreviewed-only"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Show bounded local rows for explicit human classification; never contacts a provider."""
+    try:
+        with _classification_readiness_service(config_path, data_dir) as service:
+            items = service.worklist(limit, unreviewed_only=unreviewed_only)
+        _safe_echo(f"worklist_rows: {len(items)}")
+        _safe_echo(f"limit: {limit}")
+        _safe_echo(f"unreviewed_only: {str(unreviewed_only).lower()}")
+        for item in items:
+            _safe_echo(
+                f"canonical_id={item.canonical_track_id}\ttitle={item.title}\tartists={','.join(item.artists)}"
+                f"\tpopulation_mapping={item.population_mapping_state}"
+                f"\texplicit_review={str(item.explicit_review_exists).lower()}"
+                f"\texplicit_genre_routing={item.explicit_genre_routing_state}"
+            )
+    except (OSError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
 @catalogue_match_external_recording_app.command("fetch")
 def catalogue_match_external_recording_fetch(
     limit: int = typer.Option(..., "--limit", min=1, max=100),
@@ -2155,7 +2182,7 @@ def review_batch_import(
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
     data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
 ) -> None:
-    """Atomically import 1-25 local explicit Phase 7 review decisions."""
+    """Atomically import 1-250 local explicit Phase 7 review decisions."""
     try:
         try:
             raw = json.loads(batch_file.read_text(encoding="utf-8"))
@@ -2181,7 +2208,7 @@ def routing_batch_import(
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
     data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
 ) -> None:
-    """Atomically import 1-25 local explicit Greek/Foreign routing decisions."""
+    """Atomically import 1-250 local explicit Greek/Foreign routing decisions."""
     try:
         try:
             raw = json.loads(batch_file.read_text(encoding="utf-8"))
@@ -2373,6 +2400,35 @@ def _populate_operation(service: Phase11Service, target_id: str, canonical_id: s
         return service.preview(target_id, canonical_id, **kwargs)
 
 
+def _populate_batch_operation(service: Phase11Service, canonical_ids: tuple[str, ...], resolved: str, config: ApplicationConfig, *, apply: bool, confirmation: str = ""):
+    """Use one authenticated context while retaining Phase 11 per-item safeguards."""
+    with _spotify_http_client(config) as http_client:
+        manager = _spotify_auth_manager(config, resolved, http_client)
+        reader = SpotifyReadOnlyAdapter(token_provider=manager, http_client=http_client, max_read_attempts=config.spotify.max_read_attempts)
+        account = reader.read_current_account()
+        binding = service.connection.execute("SELECT binding_id FROM platform_account_bindings WHERE active=1").fetchone()
+        kwargs = {"account_binding_id": None if binding is None else binding["binding_id"], "account_id": account.account_id, "scopes": manager.status().scopes, "reader": reader}
+        if apply:
+            return service.batch_apply(canonical_ids, confirmation, adder=SpotifyManagedTrackAdder(token_provider=manager, http_client=http_client), **kwargs)
+        return service.batch_preview(canonical_ids, **kwargs)
+
+
+def _render_population_batch(plan_id: str, canonical_ids: tuple[str, ...], entries: tuple[object, ...], *, applied: bool) -> None:
+    counts = {state: sum(getattr(item, "state") == state for item in entries) for state in (
+        "would_add", "already_present", "blocked", "recovery_required", "confirmed_added", "not_attempted",
+    )}
+    _safe_echo(f"batch_plan_id: {plan_id}")
+    _safe_echo(f"canonicals: {len(canonical_ids)}")
+    _safe_echo(f"desired_memberships: {len(entries)}")
+    for state in ("would_add", "already_present", "blocked", "recovery_required"):
+        _safe_echo(f"{state}: {counts[state]}")
+    if applied:
+        _safe_echo(f"confirmed_added: {counts['confirmed_added']}")
+        _safe_echo(f"not_attempted: {counts['not_attempted']}")
+    for item in entries:
+        _safe_echo(f"target={getattr(item, 'output_target_id')}\tcanonical={getattr(item, 'canonical_track_id')}\tstate={getattr(item, 'state')}\treason={getattr(item, 'reason')}")
+
+
 @populate_app.command("status")
 def populate_status(target_id: str = typer.Argument(...), canonical_id: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
     """Show local addition-attempt state only; no provider call is made."""
@@ -2399,6 +2455,28 @@ def populate_apply(target_id: str = typer.Argument(...), canonical_id: str = typ
         config, resolved = _population_context(config_path, client_id)
         with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=True, confirmation=confirmation)
         _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count={result.membership_count if result.membership_count is not None else '-'}\treason={result.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError, PopulationRecoveryRequired) as error: _fail(error)
+
+
+@populate_batch_app.command("preview")
+def populate_batch_preview(canonical_ids: list[str] = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Run the existing live exact preflight for each desired batch membership; never writes."""
+    try:
+        config, resolved = _population_context(config_path, client_id)
+        with _phase11_service(config_path, data_dir) as service:
+            result = _populate_batch_operation(service, tuple(canonical_ids), resolved, config, apply=False)
+        _render_population_batch(result.plan_id, result.canonical_track_ids, result.entries, applied=False)
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError) as error: _fail(error)
+
+
+@populate_batch_app.command("apply")
+def populate_batch_apply(canonical_ids: list[str] = typer.Argument(...), confirmation: str = typer.Option(..., "--confirm"), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Revalidate and apply one bounded batch using the existing one-track guarded writer."""
+    try:
+        config, resolved = _population_context(config_path, client_id)
+        with _phase11_service(config_path, data_dir) as service:
+            result = _populate_batch_operation(service, tuple(canonical_ids), resolved, config, apply=True, confirmation=confirmation)
+        _render_population_batch(result.plan_id, result.canonical_track_ids, result.entries, applied=True)
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError, PopulationRecoveryRequired) as error: _fail(error)
 
 

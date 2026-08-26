@@ -11,6 +11,7 @@ from spotify_playlist_taxonomy.domain.models import AssignmentDecision, MAX_JUST
 
 
 BATCH_SCHEMA_VERSION = "phase7-review-batch.v1"
+BATCH_MAX_DECISIONS = 250
 
 
 class ReviewBatchValidationError(ValueError):
@@ -54,7 +55,7 @@ class _BatchDecision(_StrictModel):
 
 class _BatchDocument(_StrictModel):
     schema_version: str = Field(alias="schema")
-    decisions: list[_BatchDecision] = Field(min_length=1, max_length=25)
+    decisions: list[_BatchDecision] = Field(min_length=1, max_length=BATCH_MAX_DECISIONS)
 
     @field_validator("schema_version")
     @classmethod

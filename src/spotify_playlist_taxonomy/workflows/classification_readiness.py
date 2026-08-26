@@ -15,6 +15,7 @@ from spotify_playlist_taxonomy.workflows.phase11 import (
     exact_spotify_population_mappings,
     is_exact_spotify_population_mapping,
 )
+from spotify_playlist_taxonomy.workflows.genre_routing import GenreRoutingService
 from spotify_playlist_taxonomy.workflows.research import ResearchActionabilityService
 
 
@@ -69,6 +70,16 @@ class ClassificationReadinessReport:
     selected_action: str
     selections: tuple[ReadinessSelection, ...]
     target_distribution: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ClassificationWorklistItem:
+    canonical_track_id: str
+    title: str
+    artists: tuple[str, ...]
+    population_mapping_state: str
+    explicit_review_exists: bool
+    explicit_genre_routing_state: str
 
 
 class ClassificationReadinessService:
@@ -189,6 +200,66 @@ class ClassificationReadinessService:
             selections=selected,
             target_distribution=tuple(sorted(distribution.items())),
         )
+
+    def worklist(self, limit: int = 25, *, unreviewed_only: bool = False) -> tuple[ClassificationWorklistItem, ...]:
+        """Return bounded local human-review rows without consulting match candidates or providers."""
+
+        if not 1 <= limit <= 100:
+            raise ValueError("worklist limit must be between 1 and 100")
+        canonical_rows = tuple(self.connection.execute(
+            "SELECT canonical_track_id, display_title FROM canonical_tracks ORDER BY canonical_track_id"
+        ))
+        artists: dict[str, list[str]] = {}
+        for row in self.connection.execute(
+            "SELECT canonical_track_id, artist_name FROM canonical_track_artists "
+            "ORDER BY canonical_track_id, position"
+        ):
+            artists.setdefault(row["canonical_track_id"], []).append(row["artist_name"])
+        canonical_ids = tuple(row["canonical_track_id"] for row in canonical_rows)
+        active_binding = self.connection.execute(
+            "SELECT binding_id FROM platform_account_bindings WHERE active=1 ORDER BY bound_at"
+        ).fetchone()
+        current = {} if active_binding is None else current_account_canonical_identity_mappings(
+            self.connection, active_binding["binding_id"], canonical_ids,
+        )
+        spotify = {} if active_binding is None else exact_spotify_population_mappings(
+            self.connection, active_binding["binding_id"], canonical_ids,
+        )
+        reviews = self.review.effective_many(canonical_ids)
+        review_ids = {value.canonical_track_id for value in reviews.values() if value.explicit is not None}
+        routing = GenreRoutingService(self.connection, self.bundle)
+        items: list[ClassificationWorklistItem] = []
+        for row in canonical_rows:
+            canonical_id = row["canonical_track_id"]
+            reviewed = canonical_id in review_ids
+            if unreviewed_only and reviewed:
+                continue
+            items.append(ClassificationWorklistItem(
+                canonical_id, row["display_title"],
+                tuple(artists.get(canonical_id, ())),
+                self._worklist_mapping_state(
+                    current.get(canonical_id, ()), spotify.get(canonical_id, ()), active_binding is None,
+                ),
+                reviewed, routing.show(canonical_id).state,
+            ))
+            if len(items) == limit:
+                break
+        return tuple(items)
+
+    @staticmethod
+    def _worklist_mapping_state(
+        current: tuple[tuple[str, str, str | None], ...], spotify: tuple[tuple[str, str | None], ...],
+        context_unavailable: bool,
+    ) -> str:
+        if context_unavailable:
+            return "blocked_account_context"
+        if not spotify and current:
+            return "blocked_provider_mismatch"
+        if not spotify:
+            return "blocked_missing"
+        if len(spotify) != 1:
+            return "blocked_multiple"
+        return "safe" if is_exact_spotify_population_mapping(spotify) else "blocked_invalid"
 
     @staticmethod
     def _mapping_counts(
