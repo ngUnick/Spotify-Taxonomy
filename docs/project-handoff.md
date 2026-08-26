@@ -36,7 +36,8 @@ memberships. Managed Genre, Vibe, and Activity targets have been provisioned as 
 - `catalogue classify worklist --limit 1..100 --unreviewed-only` is a local account-scoped selection surface.
   `populate batch preview CANONICAL_ID...` and `populate batch apply CANONICAL_ID... --confirm APPLY:PLAN_ID`
   make a bounded up-to-100-canonical population run practical while retaining the existing per-track attempt,
-  provider read-back, recovery, and fail-closed mapping guarantees.
+  provider read-back, recovery, and fail-closed mapping guarantees. A batch shares one live exact-membership
+  snapshot per target only for that invocation; every actual add still has its own journal and provider read-back.
 
 ## Current execution direction
 

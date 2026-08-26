@@ -36,6 +36,14 @@ class PopulationRecoveryRequired(PopulationError):
     pass
 
 
+class PopulationQuotaExhausted(PopulationError):
+    """A definitively rejected provider write stops a batch without becoming ambiguous."""
+
+    def __init__(self, error: SpotifyAdapterError) -> None:
+        self.retry_after_seconds = error.retry_after_seconds
+        super().__init__(str(error))
+
+
 def current_account_canonical_identity_mappings(
     connection: sqlite3.Connection, account_binding_id: str,
     canonical_track_ids: tuple[str, ...] | None = None,
@@ -127,6 +135,24 @@ class _Preflight:
     required_scopes: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _TargetPreflight:
+    """Exact managed-target checks shared by one bounded batch invocation."""
+
+    target_id: str
+    registration_id: str
+    playlist_id: str
+    required_scopes: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class _BatchTargetSnapshot:
+    """Ephemeral exact-playlist membership state; never persisted or reused."""
+
+    target: _TargetPreflight
+    membership_counts: dict[str, int]
+
+
 class Phase11Service:
     """One explicitly confirmed addition, never a generic synchronization writer."""
     def __init__(self, connection: sqlite3.Connection, bundle: Phase4Bundle) -> None:
@@ -179,16 +205,13 @@ class Phase11Service:
         return sha256(payload).hexdigest()[:16]
 
     def batch_preview(self, canonical_ids: tuple[str, ...], *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader) -> BatchPopulationPreview:
-        """Run the ordinary exact live preflight for every current desired membership."""
+        """Preflight a bounded batch with one live membership snapshot per target."""
 
         canonical_ids = self._batch_canonical_ids(canonical_ids)
         plan_id = self.batch_plan_id(canonical_ids)
-        entries = tuple(
-            self.preview(membership.output_target_id, state.canonical_track_id,
-                         account_binding_id=account_binding_id, account_id=account_id,
-                         scopes=scopes, reader=reader)
-            for state in self.phase9.desired_many(canonical_ids)
-            for membership in state.memberships
+        entries, _, _ = self._batch_preflight(
+            canonical_ids, account_binding_id=account_binding_id, account_id=account_id,
+            scopes=scopes, reader=reader,
         )
         return BatchPopulationPreview(plan_id, canonical_ids, entries)
 
@@ -199,38 +222,57 @@ class Phase11Service:
         expected_plan_id = self.batch_plan_id(canonical_ids)
         if confirmation != f"APPLY:{expected_plan_id}":
             raise PopulationError("explicit confirmation must equal APPLY:<batch-plan-id>")
-        preview = self.batch_preview(
+        entries, preflights, snapshots = self._batch_preflight(
             canonical_ids, account_binding_id=account_binding_id, account_id=account_id,
             scopes=scopes, reader=reader,
         )
-        entries: list[PopulationStatus] = []
-        pending = list(preview.entries)
+        # All exact provider policy and membership reads complete above before any add request.
+        outcome_entries: list[PopulationStatus] = []
+        pending = list(entries)
         while pending:
             item = pending.pop(0)
             if item.state != "would_add":
-                entries.append(item)
+                outcome_entries.append(item)
                 continue
             try:
-                # `apply` records its attempt before the outbound request and verifies read-back afterwards.
-                entries.append(self.apply(
-                    item.output_target_id, item.canonical_track_id,
+                preflight = preflights[(item.output_target_id, item.canonical_track_id)]
+                snapshot = snapshots[item.output_target_id]
+                if snapshot.membership_counts.get(preflight.provider_track_id, 0):
+                    outcome_entries.append(PopulationStatus(
+                        item.output_target_id, item.canonical_track_id, "already_present",
+                        "exact managed playlist already contains the desired provider track",
+                        snapshot.membership_counts[preflight.provider_track_id], preflight.required_scopes,
+                    ))
+                    continue
+                # Shared with `apply`: journal before one outbound add, then mandatory read-back.
+                outcome_entries.append(self._apply_preflight(
+                    preflight,
                     f"ADD:{item.output_target_id}:{item.canonical_track_id}",
-                    account_binding_id=account_binding_id, account_id=account_id,
-                    scopes=scopes, reader=reader, adder=adder,
+                    reader=reader, adder=adder,
+                    snapshot=snapshot,
                 ))
             except PopulationRecoveryRequired as error:
-                entries.append(PopulationStatus(item.output_target_id, item.canonical_track_id, "recovery_required", str(error)))
-                entries.extend(
+                outcome_entries.append(PopulationStatus(item.output_target_id, item.canonical_track_id, "recovery_required", str(error)))
+                outcome_entries.extend(
                     PopulationStatus(next_item.output_target_id, next_item.canonical_track_id, "not_attempted",
                                      "not attempted after an ambiguous outbound addition; recovery verification is required")
                     for next_item in pending if next_item.state == "would_add"
                 )
-                entries.extend(next_item for next_item in pending if next_item.state != "would_add")
+                outcome_entries.extend(next_item for next_item in pending if next_item.state != "would_add")
+                break
+            except PopulationQuotaExhausted as error:
+                outcome_entries.append(PopulationStatus(item.output_target_id, item.canonical_track_id, "blocked", str(error)))
+                outcome_entries.extend(
+                    PopulationStatus(next_item.output_target_id, next_item.canonical_track_id, "not_attempted",
+                                     "not attempted after provider quota exhaustion")
+                    for next_item in pending if next_item.state == "would_add"
+                )
+                outcome_entries.extend(next_item for next_item in pending if next_item.state != "would_add")
                 break
             except PopulationError as error:
                 # A definitively rejected request remains isolated; unrelated safe items may proceed.
-                entries.append(PopulationStatus(item.output_target_id, item.canonical_track_id, "blocked", str(error)))
-        return BatchPopulationOutcome(preview.plan_id, canonical_ids, tuple(entries))
+                outcome_entries.append(PopulationStatus(item.output_target_id, item.canonical_track_id, "blocked", str(error)))
+        return BatchPopulationOutcome(expected_plan_id, canonical_ids, tuple(outcome_entries))
 
     def apply(self, target_id: str, canonical_id: str, confirmation: str, *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader, adder: ManagedTrackAdder) -> PopulationStatus:
         if confirmation != f"ADD:{target_id}:{canonical_id}":
@@ -240,6 +282,12 @@ class Phase11Service:
             return PopulationStatus(target_id, canonical_id, "already_present", "exact managed playlist already contains the desired provider track", item.membership_count, item.required_scopes)
         if self._unresolved(target_id, canonical_id) is not None:
             raise PopulationRecoveryRequired("an earlier addition outcome is unresolved; automatic retry is disabled")
+        return self._apply_preflight(item, confirmation, reader=reader, adder=adder)
+
+    def _apply_preflight(self, item: _Preflight, confirmation: str, *, reader: MusicPlatformReader, adder: ManagedTrackAdder, snapshot: _BatchTargetSnapshot | None = None) -> PopulationStatus:
+        """Perform the one-track guarded write and mandatory provider read-back."""
+
+        target_id, canonical_id = item.target_id, item.canonical_id
         attempt_id = f"addition.{uuid.uuid4().hex}"
         try:
             self.connection.execute(
@@ -253,6 +301,9 @@ class Phase11Service:
         try:
             adder.add_one_managed_track(item.playlist_id, item.provider_track_id)
         except SpotifyAdapterError as error:
+            if error.kind is SpotifyErrorKind.QUOTA_EXHAUSTED:
+                self._finalize(attempt_id, "provider_rejected", acknowledged=False, count=None)
+                raise PopulationQuotaExhausted(error) from None
             if error.kind in {SpotifyErrorKind.REQUEST_NOT_SENT, SpotifyErrorKind.PROVIDER_REJECTED}:
                 state = "request_not_sent" if error.kind is SpotifyErrorKind.REQUEST_NOT_SENT else "provider_rejected"
                 self._finalize(attempt_id, state, acknowledged=False, count=None)
@@ -272,6 +323,9 @@ class Phase11Service:
             self._finalize(attempt_id, "confirmed_added", acknowledged=True, count=1)
         except PopulationError:
             raise PopulationRecoveryRequired("local_finalization_failed_after_provider_confirmation: recovery verification is required") from None
+        if snapshot is not None:
+            # The confirmed read-back remains authoritative; this only informs later batch entries.
+            snapshot.membership_counts[item.provider_track_id] = count
         return PopulationStatus(target_id, canonical_id, "confirmed_added", "one exact provider track was confirmed present by read-back", 1, item.required_scopes)
 
     def recover_verify(self, target_id: str, canonical_id: str, confirmation: str, *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader) -> PopulationStatus:
@@ -292,6 +346,13 @@ class Phase11Service:
         self._target(target_id); self._canonical(canonical_id)
         if target_id not in {item.output_target_id for item in self.phase9.desired(canonical_id).memberships}:
             raise PopulationError("canonical track does not have an effective desired membership for this target")
+        target = self._target_preflight(target_id, account_binding_id=account_binding_id, account_id=account_id, scopes=scopes, reader=reader)
+        identity_id, provider_track_id = self._mapping(canonical_id, account_binding_id)
+        count = self._membership_count(target.playlist_id, provider_track_id, reader)
+        return _Preflight(target_id, canonical_id, target.registration_id, target.playlist_id, identity_id, provider_track_id, count, target.required_scopes)
+
+    def _target_preflight(self, target_id: str, *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader) -> _TargetPreflight:
+        self._target(target_id)
         registration = self.connection.execute("SELECT * FROM managed_target_registrations WHERE output_target_id=?", (target_id,)).fetchone()
         if registration is None or registration["state"] != "active" or registration["provider_playlist_id"] is None:
             raise PopulationError("no active exact managed registration exists")
@@ -311,9 +372,67 @@ class Phase11Service:
         required = self._required_scopes(policy.public_state)
         if not set(required).issubset(scopes):
             raise PopulationError("reauthorization with --managed-population is required for this provider playlist publication state")
-        identity_id, provider_track_id = self._mapping(canonical_id, account_binding_id)
-        count = self._membership_count(registration["provider_playlist_id"], provider_track_id, reader)
-        return _Preflight(target_id, canonical_id, registration["registration_id"], registration["provider_playlist_id"], identity_id, provider_track_id, count, required)
+        return _TargetPreflight(target_id, registration["registration_id"], registration["provider_playlist_id"], required)
+
+    def _batch_preflight(self, canonical_ids: tuple[str, ...], *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader) -> tuple[tuple[PopulationStatus, ...], dict[tuple[str, str], _Preflight], dict[str, _BatchTargetSnapshot]]:
+        """Read each safe exact target once before a batch can dispatch any outbound write."""
+
+        memberships = tuple(
+            (membership.output_target_id, state.canonical_track_id)
+            for state in self.phase9.desired_many(canonical_ids)
+            for membership in state.memberships
+        )
+        statuses: dict[tuple[str, str], PopulationStatus] = {}
+        mappings: dict[tuple[str, str], tuple[str, str]] = {}
+        preflights: dict[tuple[str, str], _Preflight] = {}
+        grouped: dict[str, list[tuple[str, str]]] = {}
+        for target_id, canonical_id in memberships:
+            try:
+                self._target_local_registration(target_id, account_binding_id=account_binding_id, account_id=account_id)
+                mappings[(target_id, canonical_id)] = self._mapping(canonical_id, account_binding_id)
+            except PopulationError as error:
+                statuses[(target_id, canonical_id)] = PopulationStatus(target_id, canonical_id, "blocked", str(error))
+            else:
+                grouped.setdefault(target_id, []).append((target_id, canonical_id))
+
+        snapshots: dict[str, _BatchTargetSnapshot] = {}
+        for target_id, target_memberships in grouped.items():
+            try:
+                target = self._target_preflight(target_id, account_binding_id=account_binding_id, account_id=account_id, scopes=scopes, reader=reader)
+                snapshot = _BatchTargetSnapshot(target, self._membership_snapshot(target.playlist_id, reader))
+            except PopulationError as error:
+                for _, canonical_id in target_memberships:
+                    statuses[(target_id, canonical_id)] = PopulationStatus(target_id, canonical_id, "blocked", str(error))
+                continue
+            snapshots[target_id] = snapshot
+            for _, canonical_id in target_memberships:
+                identity_id, provider_track_id = mappings[(target_id, canonical_id)]
+                count = snapshot.membership_counts.get(provider_track_id, 0)
+                preflight = _Preflight(target_id, canonical_id, target.registration_id, target.playlist_id, identity_id, provider_track_id, count, target.required_scopes)
+                if count:
+                    statuses[(target_id, canonical_id)] = PopulationStatus(target_id, canonical_id, "already_present", "exact managed playlist already contains the desired provider track", count, target.required_scopes)
+                elif self._unresolved(target_id, canonical_id) is not None:
+                    statuses[(target_id, canonical_id)] = PopulationStatus(target_id, canonical_id, "recovery_required", "an earlier addition outcome is unresolved; automatic retry is disabled", 0, target.required_scopes)
+                else:
+                    statuses[(target_id, canonical_id)] = PopulationStatus(target_id, canonical_id, "would_add", "one exact provider track would be appended to the exact managed playlist", 0, target.required_scopes)
+                    preflights[(target_id, canonical_id)] = preflight
+
+        return tuple(statuses[(target_id, canonical_id)] for target_id, canonical_id in memberships), preflights, snapshots
+
+    def _target_local_registration(self, target_id: str, *, account_binding_id: str | None, account_id: str | None) -> None:
+        """Perform local-only checks before a blocked mapping can trigger a provider read."""
+
+        self._target(target_id)
+        registration = self.connection.execute("SELECT * FROM managed_target_registrations WHERE output_target_id=?", (target_id,)).fetchone()
+        if registration is None or registration["state"] != "active" or registration["provider_playlist_id"] is None:
+            raise PopulationError("no active exact managed registration exists")
+        if registration["policy_confirmed"] != 1:
+            raise PopulationError("managed registration is not policy-confirmed")
+        if account_binding_id is None or account_binding_id != registration["account_binding_id"]:
+            raise PopulationError("managed registration belongs to a different active account binding")
+        binding = self.connection.execute("SELECT account_id FROM platform_account_bindings WHERE binding_id=? AND active=1", (account_binding_id,)).fetchone()
+        if binding is None or account_id is None or binding["account_id"] != account_id:
+            raise PopulationError("authenticated provider account does not match the active local binding")
 
     def _mapping(self, canonical_id: str, account_binding_id: str) -> tuple[str, str]:
         rows = exact_spotify_population_mappings(
@@ -327,7 +446,10 @@ class Phase11Service:
         return identity_id, track_id
 
     def _membership_count(self, playlist_id: str, provider_track_id: str, reader: MusicPlatformReader) -> int:
-        cursor: str | None = None; seen: set[str] = set(); count = 0
+        return self._membership_snapshot(playlist_id, reader).get(provider_track_id, 0)
+
+    def _membership_snapshot(self, playlist_id: str, reader: MusicPlatformReader) -> dict[str, int]:
+        cursor: str | None = None; seen: set[str] = set(); counts: dict[str, int] = {}
         while True:
             if cursor is not None:
                 if cursor in seen: raise PopulationError("playlist membership pagination did not complete")
@@ -336,10 +458,11 @@ class Phase11Service:
             if page.issues:
                 raise PopulationError("playlist membership cannot be counted safely")
             for track in page.items:
-                if track.provider_track_id == provider_track_id or track.linked_from_provider_track_id == provider_track_id:
-                    count += 1
+                for provider_track_id in {track.provider_track_id, track.linked_from_provider_track_id}:
+                    if isinstance(provider_track_id, str):
+                        counts[provider_track_id] = counts.get(provider_track_id, 0) + 1
             if page.next_cursor is None:
-                return count
+                return counts
             cursor = page.next_cursor
 
     @staticmethod

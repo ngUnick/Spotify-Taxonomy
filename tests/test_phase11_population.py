@@ -15,18 +15,23 @@ from spotify_playlist_taxonomy.domain.models import CanonicalTrack, CanonicalTra
 from spotify_playlist_taxonomy.persistence import SQLiteStateStore, apply_migrations, connect_database, sync_taxonomy
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 from spotify_playlist_taxonomy.ports.music_platform import PlatformAccountIdentity, PlatformPlaylistSummary, TrackIdentityPage
-from spotify_playlist_taxonomy.workflows.phase11 import Phase11Service, PopulationError, PopulationRecoveryRequired
+from spotify_playlist_taxonomy.workflows.phase11 import _BatchTargetSnapshot, _Preflight, _TargetPreflight, Phase11Service, PopulationError, PopulationRecoveryRequired
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class _Reader:
-    def __init__(self, tracks: tuple[PlatformTrackIdentity, ...] = (), *, public: bool | None = False, owner: str = "user.synthetic", collaborative: bool = False, broken: bool = False) -> None:
+    def __init__(self, tracks: tuple[PlatformTrackIdentity, ...] = (), *, public: bool | None = False, owner: str = "user.synthetic", collaborative: bool = False, broken: bool = False, quota_on_membership_read: int | None = None) -> None:
         self.tracks, self.public, self.owner, self.collaborative, self.broken, self.reads = tracks, public, owner, collaborative, broken, 0
-    def read_current_account(self) -> PlatformAccountIdentity: return PlatformAccountIdentity("account.synthetic", "user.synthetic")
-    def read_playlist(self, playlist_id: str) -> PlatformPlaylistSummary: return PlatformPlaylistSummary(playlist_id, "Chill", self.owner, self.collaborative, self.public, len(self.tracks), "synthetic")
+        self.quota_on_membership_read, self.membership_reads, self.events = quota_on_membership_read, [], []
+    def read_current_account(self) -> PlatformAccountIdentity:
+        self.events.append("account"); return PlatformAccountIdentity("account.synthetic", "user.synthetic")
+    def read_playlist(self, playlist_id: str) -> PlatformPlaylistSummary:
+        self.events.append(f"playlist:{playlist_id}"); return PlatformPlaylistSummary(playlist_id, "Chill", self.owner, self.collaborative, self.public, len(self.tracks), "synthetic")
     def read_playlist_items(self, playlist_id: str, cursor: str | None = None) -> TrackIdentityPage:
-        self.reads += 1
+        self.reads += 1; self.membership_reads.append(playlist_id); self.events.append(f"membership:{playlist_id}")
+        if self.quota_on_membership_read == self.reads:
+            raise SpotifyAdapterError(SpotifyErrorKind.QUOTA_EXHAUSTED, "Spotify API quota is exhausted; read processing stopped", reason="QUOTA_EXCEEDED", retry_after_seconds=60)
         if self.broken: raise RuntimeError("synthetic read failure")
         entries = tuple(__import__("spotify_playlist_taxonomy.ports.music_platform", fromlist=["PlatformTrackReadEntry"]).PlatformTrackReadEntry(index, identity=item) for index, item in enumerate(self.tracks))
         return TrackIdentityPage(self.tracks, None, None, entries=entries, limit=len(entries), total=len(entries))
@@ -66,10 +71,11 @@ class Phase11PopulationTests(unittest.TestCase):
         canonical = f"canonical.synthetic.phase11.{suffix}"
         identity = f"identity.synthetic.phase11.{suffix}"
         SQLiteStateStore(self.connection).save_canonical_track(CanonicalTrack(canonical, "Synthetic", ("Artist",)))
-        self.connection.execute(
-            "INSERT INTO managed_target_registrations VALUES (?, ?, 'spotify', ?, ?, 'active', 'phase10_create', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
-            (target, f"registration.synthetic.{suffix}", self.binding, f"playlist{suffix}"),
-        )
+        if target != self.target:
+            self.connection.execute(
+                "INSERT INTO managed_target_registrations VALUES (?, ?, 'spotify', ?, ?, 'active', 'phase10_create', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)",
+                (target, f"registration.synthetic.{suffix}", self.binding, f"playlist{suffix}"),
+            )
         self.connection.commit()
         SQLiteStateStore(self.connection).save_track_identity(PlatformTrackIdentity(identity, IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), f"track{suffix}"))
         self.connection.execute("INSERT INTO account_track_identity_state VALUES (?, ?, 'scan.synthetic.phase11', 'source.synthetic.phase11', NULL, NULL, 0, 0, '2026-01-01T00:00:00Z')", (self.binding, identity))
@@ -82,6 +88,7 @@ class Phase11PopulationTests(unittest.TestCase):
 
     def test_preview_and_apply_are_one_track_idempotent(self) -> None:
         reader = _Reader(); preview = self.service.preview(self.target, self.canonical, **self._args(reader)); self.assertEqual("would_add", preview.state)
+        self.assertEqual(0, self.connection.execute("SELECT COUNT(*) FROM managed_target_addition_attempts").fetchone()[0])
         adder = _Adder(reader); result = self.service.apply(self.target, self.canonical, f"ADD:{self.target}:{self.canonical}", adder=adder, **self._args(reader))
         self.assertEqual("confirmed_added", result.state); self.assertEqual([("playlistsynthetic", "tracksynthetic")], adder.calls)
         self.assertEqual("already_present", self.service.apply(self.target, self.canonical, f"ADD:{self.target}:{self.canonical}", adder=adder, **self._args(reader)).state); self.assertEqual(1, len(adder.calls))
@@ -138,6 +145,81 @@ class Phase11PopulationTests(unittest.TestCase):
         self.assertEqual(1, outcome.count("not_attempted"))
         self.assertEqual(1, outcome.count("blocked"))
 
+    def test_batch_shares_exact_target_snapshots_and_avoids_blocked_mapping_reads(self) -> None:
+        same_target = self._additional_desired_membership("snapshotsame", self.target)
+        reader = _Reader()
+        preview = self.service.batch_preview((self.canonical, same_target), **self._args(reader))
+        self.assertEqual(2, preview.count("would_add"))
+        self.assertEqual(["playlistsynthetic"], reader.membership_reads)
+
+        second = self._additional_desired_membership("snapshotother")
+        multi_target_reader = _Reader()
+        self.service.batch_preview((self.canonical, second), **self._args(multi_target_reader))
+        self.assertEqual(2, len(multi_target_reader.membership_reads))
+        self.assertEqual(2, len(set(multi_target_reader.membership_reads)))
+
+        self.connection.execute("DELETE FROM account_canonical_identity_links WHERE canonical_track_id=?", (self.canonical,)); self.connection.commit()
+        blocked_reader = _Reader()
+        blocked = self.service.batch_preview((self.canonical,), **self._args(blocked_reader))
+        self.assertEqual("blocked", blocked.entries[0].state)
+        self.assertEqual([], blocked_reader.membership_reads)
+
+    def test_batch_apply_reads_all_initial_snapshots_before_writes_and_reuses_confirmed_snapshot(self) -> None:
+        same_target = self._additional_desired_membership("sametarget", self.target)
+        reader = _Reader()
+        class SequencedAdder:
+            def __init__(self, target: _Reader) -> None: self.target, self.calls = target, []
+            def add_one_managed_track(self, playlist_id: str, provider_track_id: str) -> None:
+                self.target.events.append("add"); self.calls.append((playlist_id, provider_track_id))
+                self.target.tracks += (PlatformTrackIdentity("seen.snapshot", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), provider_track_id),)
+        adder = SequencedAdder(reader)
+        plan_id = self.service.batch_plan_id((self.canonical, same_target))
+        outcome = self.service.batch_apply((self.canonical, same_target), f"APPLY:{plan_id}", adder=adder, **self._args(reader))
+        self.assertEqual(2, outcome.count("confirmed_added"))
+        self.assertEqual(2, len(adder.calls))
+        self.assertEqual(3, reader.reads, "one initial target snapshot plus one mandatory post-write read-back per add")
+        self.assertLess(reader.events.index("membership:playlistsynthetic"), reader.events.index("add"))
+
+        snapshot = _BatchTargetSnapshot(_TargetPreflight(self.target, "registration.synthetic", "playlistsynthetic", ("playlist-modify-private",)), {})
+        item = _Preflight(self.target, self.canonical, "registration.synthetic", "playlistsynthetic", "identity.synthetic", "tracksynthetic", 0, ("playlist-modify-private",))
+        one_reader = _Reader(); self.service._apply_preflight(item, f"ADD:{self.target}:{self.canonical}", reader=one_reader, adder=_Adder(one_reader), snapshot=snapshot)
+        self.assertEqual(1, snapshot.membership_counts["tracksynthetic"])
+
+    def test_batch_quota_in_initial_read_has_zero_writes_and_readback_quota_requires_recovery(self) -> None:
+        second = self._additional_desired_membership("quotasame", self.target)
+        initial_reader = _Reader(quota_on_membership_read=1); initial_adder = _Adder(initial_reader)
+        plan_id = self.service.batch_plan_id((self.canonical, second))
+        with self.assertRaises(SpotifyAdapterError) as raised:
+            self.service.batch_apply((self.canonical, second), f"APPLY:{plan_id}", adder=initial_adder, **self._args(initial_reader))
+        self.assertEqual(SpotifyErrorKind.QUOTA_EXHAUSTED, raised.exception.kind)
+        self.assertEqual(60, raised.exception.retry_after_seconds)
+        self.assertEqual([], initial_adder.calls)
+
+        readback_reader = _Reader(quota_on_membership_read=2); readback_adder = _Adder(readback_reader)
+        outcome = self.service.batch_apply((self.canonical, second), f"APPLY:{plan_id}", adder=readback_adder, **self._args(readback_reader))
+        self.assertEqual(1, outcome.count("recovery_required"))
+        self.assertEqual(1, outcome.count("not_attempted"))
+        self.assertEqual(1, len(readback_adder.calls))
+
+    def test_batch_stops_cleanly_after_definitive_quota_rejection_following_confirmation(self) -> None:
+        second = self._additional_desired_membership("quotaafterone", self.target)
+        third = self._additional_desired_membership("quotaaftertwo", self.target)
+        reader = _Reader()
+        class QuotaAfterOneAdder:
+            def __init__(self) -> None: self.calls: list[tuple[str, str]] = []
+            def add_one_managed_track(self, playlist_id: str, provider_track_id: str) -> None:
+                self.calls.append((playlist_id, provider_track_id))
+                if len(self.calls) == 2:
+                    raise SpotifyAdapterError(SpotifyErrorKind.QUOTA_EXHAUSTED, "Spotify API quota is exhausted; managed addition was not dispatched", reason="QUOTA_EXCEEDED", retry_after_seconds=60)
+                reader.tracks += (PlatformTrackIdentity("seen.quota", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), provider_track_id),)
+        adder = QuotaAfterOneAdder()
+        canonical_ids = (self.canonical, second, third)
+        outcome = self.service.batch_apply(canonical_ids, f"APPLY:{self.service.batch_plan_id(canonical_ids)}", adder=adder, **self._args(reader))
+        self.assertEqual(1, outcome.count("confirmed_added"))
+        self.assertEqual(1, outcome.count("blocked"))
+        self.assertEqual(1, outcome.count("not_attempted"))
+        self.assertEqual(2, len(adder.calls))
+
     def test_adapter_posts_one_uri_without_position_and_no_generic_writer_exists(self) -> None:
         seen: dict[str, object] = {}
         class Token:
@@ -149,6 +231,16 @@ class Phase11PopulationTests(unittest.TestCase):
         self.assertEqual("/v1/playlists/playlistsynthetic/items", seen["path"]); self.assertEqual(b'{"uris":["spotify:track:tracksynthetic"]}', seen["content"])
         from spotify_playlist_taxonomy.ports import music_platform
         self.assertFalse(hasattr(music_platform, "GuardedMusicPlatformWriter")); self.assertFalse(hasattr(adapter, "remove_items")); self.assertFalse(hasattr(adapter, "add_items"))
+
+    def test_adapter_surfaces_quota_rejection_without_a_multi_track_write(self) -> None:
+        class Token:
+            def access_token(self, *, force_refresh: bool = False) -> str: return "synthetic"
+        def handler(request: httpx.Request) -> httpx.Response: return httpx.Response(429, headers={"Retry-After": "60"})
+        adapter = SpotifyManagedTrackAdder(token_provider=Token(), http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+        with self.assertRaises(SpotifyAdapterError) as raised:
+            adapter.add_one_managed_track("playlistsynthetic", "tracksynthetic")
+        self.assertEqual(SpotifyErrorKind.QUOTA_EXHAUSTED, raised.exception.kind)
+        self.assertEqual(60, raised.exception.retry_after_seconds)
 
 
 if __name__ == "__main__": unittest.main()

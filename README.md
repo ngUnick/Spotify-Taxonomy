@@ -137,8 +137,10 @@ review and any necessary routing decisions, run `spotify-taxonomy populate batch
 It prints a deterministic `batch_plan_id` and runs the same live exact-ID preflight as one-track population for
 every current desired membership. Apply that bounded plan with
 `spotify-taxonomy populate batch apply CANONICAL_ID... --confirm APPLY:BATCH_PLAN_ID`.
-Apply re-runs preflight, writes one track at a time through the existing guarded path, verifies each write by
-read-back, skips blocked/already-present entries, and stops after an ambiguous outbound result. It never removes,
+Within one preview or apply invocation, preflight shares one exact live membership snapshot per managed target;
+the snapshot is never persisted or reused. Apply re-runs preflight, writes one track at a time through the existing
+guarded path, verifies every write by read-back, skips blocked/already-present entries, and stops after an ambiguous
+outbound result. It never removes,
 reorders, replaces, adopts a playlist by name, or repairs an ambiguous mapping automatically.
 
 Catalogue review commands are local and scoped to the active account binding. They deliberately show only
