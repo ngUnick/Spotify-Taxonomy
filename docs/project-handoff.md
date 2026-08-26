@@ -1,113 +1,58 @@
 # Project handoff
 
-## Repository state
+## Current repository state
 
 - Repository: `C:\Users\USER\Desktop\Projects\Spotify-Taxonomy`
-- Branch: `dev`
-- Completed phases: 0, 1, 2, 3, 4, 5, 6, and 7
-- Current boundary: Phase 7 is complete; Phase 8 has not started
+- Development branch: `dev` at `7fda6777ae2d456fa501cd224f10297e6915d6ee`
+- `main` and `origin/main`: `80d6b8fcc61e7e9972d9da7a5185a2ab8a8c3236`
+- `dev` is one fast-forward commit ahead of `main`; the working tree is clean.
+- Schema: 19
+- Taxonomy: `taxonomy.v2`, with 36 reviewed semantic specifications and 51 concrete output targets.
 
-## Phase 3 completion baseline
+## Implemented operational path
 
-The final read-only audit confirmed one active stable Spotify `account_id` binding and three active ingestion
-sources. Each source has exactly one authoritative publication, every authoritative scan is completed and
-consistency-checked, and no noncompleted scan contributes to matching:
+Phases 0–12 / V1 are implemented. The repository maintains account-scoped source ingestion and portable
+canonical identity, conservative matching with explicit human confirmation, bounded evidence and research
+workflows, deterministic derivation/classification, Phase 7 effective review state, supervised Phase 8 file
+exchange, Phase 9 desired state, managed-target provisioning, and guarded one-track population.
 
-| Source type | Role | Published occurrences |
-| --- | --- | ---: |
-| Registered playlist | SOURCE | 48 |
-| Singleton Saved Tracks/Liked Songs | INBOX | 506 |
-| Explicitly selected playlist-backed Shazam source | INBOX | 252 |
-| **Total** |  | **806** |
+V1 end-to-end operation has been demonstrated under supervision: a human explicit include creates desired
+membership, an exact managed target is verified, and guarded population adds one canonical track at a time
+with provider read-back. Batch 01 completed safe memberships while ambiguous provider mappings remained
+blocked. Batch 02 added explicit Foreign routing for included Genre semantics and populated only safe
+memberships. Managed Genre, Vibe, and Activity targets have been provisioned as needed.
 
-The published catalogue contains 744 distinct provider identities, 740 portable canonical tracks, and 744
-active account-scoped identity links. There are no staged-only identities, invalid authoritative
-publications, review-required identities, or actionable candidates. Four ambiguous duplicate cases were
-explicitly confirmed by the user as links to existing canonical tracks; the four selected candidates are
-recorded with `user_confirmation`, their four create-new alternatives are superseded, and no new canonical
-track was created by those decisions. Link history contains 744 events: 740 system bootstraps and four user
-confirmations.
+## Latest features
 
-Provider identities and canonical tracks are global/portable. Source state, identity adoption, active links,
-matching candidates, interventions, and decision history are scoped to the stable account binding. Playlist
-discovery is ephemeral; a stable ID must be explicitly selected and registered before it becomes a source.
-The Saved Tracks/Liked Songs source is a singleton library INBOX. A playlist name never grants Shazam INBOX
-authority.
+- `spotify-taxonomy review batch import <FILE>` imports 1–25 fully validated, atomic Phase 7 explicit human
+  decisions in `phase7-review-batch.v1` format. It uses the same review-event, precedence, history, and
+  idempotence rules as individual review decisions.
+- `spotify-taxonomy routing batch import <FILE>` imports 1–25 fully validated, atomic explicit `greek` or
+  `foreign` Genre-routing decisions in `genre-routing-batch.v1` format. `spotify-taxonomy routing show
+  <CANONICAL_ID>` reports its local current state.
+- Explicit Genre routing is canonical-recording scoped and takes precedence over current derived routing.
+  It is separate from semantic classification: it is consulted only after an effective included `genre.*`
+  decision and cannot create Genre membership by itself.
 
-Playlist ingestion accepts only the current `/playlists/{id}/items` response with canonical nested `item`.
-The legacy nested-`track` fallback was removed after live validation. SOURCE and INBOX inputs remain
-immutable/read-only. Phase 3 requested no Spotify modify scope and introduced no Spotify writer.
+## Current execution direction
 
-SQLite integrity is `ok` with zero foreign-key violations. Real runtime data and protected credentials live
-outside Git under the approved per-user runtime and credential backends. No real title, artist, playlist ID,
-account ID, raw response, token, database, log, backup, export, or batch is source-controlled.
+Continue with small human-reviewed batches, inspect effective/desired state, and populate only one verified
+target + one canonical at a time. Do not make broad external-provider research the default scaling strategy,
+and do not relax canonical matching safety. Unresolved or ambiguous Spotify mappings remain fail closed.
 
-## Known limitations and deferred work
-
-- MusicBrainz and Wikidata have completed their authorized local provider checkpoint. Research remains
-  evidence-only; no classification has occurred.
-- Saved Tracks has no snapshot identifier, so its complete scan uses beginning/end total and initial-page
-  signature checks rather than playlist-strength snapshot consistency.
-- The current Spotify platform may restrict playlist item access even when metadata discovery succeeds.
-- Desired state, dry-run synchronization, managed provisioning, guarded addition-only execution, and
-  operation journaling remain later-phase designs only.
-- V1 remains manually invoked and user supervised; there is no unattended scheduler or destructive
-  reconciliation.
-
-## Remaining roadmap
-
-8. Add Codex supervised file-exchange classification.
-9. Add desired state / dry-run synchronization.
-10. Run a managed-playlist provisioning pilot.
-11. Add guarded addition-only population.
-12. Add periodic inbox processing / V1 hardening.
-
-## Phase 4 completion
-
-Application configuration schema v3 references a source-controlled, explicitly reviewed
-`characteristics.v1` vocabulary and specification manifest. The manifest covers exactly the unchanged 36
-stable logical playlist IDs and maps them to 15 Genre, 10 Vibe, and 11 Activity specification files plus
-centralized overlap guidance. The 15
-Genre meanings remain semantic definitions; a separate registry expands them to Greek and Foreign targets,
-while Vibe and Activity remain unsplit, for 51 future concrete targets. The vocabulary contains 58 reusable
-characteristics in 13 families, including version-sensitive language and cultural-context routing inputs.
-Strict offline loading validates paths, versions, statuses, references, typed operators/values, required
-overlap groups, target coverage, the closed routing policy, and a deterministic full-bundle digest.
-
-All 36 specifications, the manifest, and the 58-characteristic vocabulary are `reviewed`. Greek/Foreign
-routing remains downstream from semantic Genre classification; balanced, missing, and genuinely ambiguous
-routing remains unresolved for later human review rather than defaulting to Foreign. Phase 4 added no
-migration or runtime synchronization and performed no real classification, research, or Spotify access.
-The source bundle contains no track assignments or real catalogue/account metadata.
-
-## Phase 5 implementation boundary
-
-Migration 5 and the local coordinator persist compact provider assertions, normalized evidence provenance,
-cache/freshness state, and research attempts for explicit canonical IDs. MusicBrainz is limited to structured
-recording/version/work/release/credit relationships without tags or ratings. Wikidata is limited to supported
-structured statements and preserves contextual work/project scope. `research show` and `research status` are
-offline; `research run` requires explicit `--network` and a maximum of 25 IDs. No raw provider response,
-characteristic, playlist proposal, Genre variant result, or Spotify capability is produced.
-
-## Phase 6 completion
-
-Migration 6 persists deterministic, versioned, auditable evidence-to-characteristic derivations and
-review-required semantic proposals for explicit canonical IDs. Derivation/classification is offline and
-does not refresh research evidence. Unknown, insufficient, probable, contextual, stale, and contradictory
-evidence is not silently promoted. Semantic proposals remain separate from user decisions, while runtime
-Greek/Foreign routing remains later/downstream.
-
-## Exact next action
-
-Phase 8 — supervised Codex file-exchange classification. Do not begin without separate authorization.
+`sync plan` is a local dry-run surface and does not currently have authoritative managed-membership snapshots.
+It is therefore not required before population. `populate preview` is the live, exact-ID authoritative
+preflight for a selected population operation; `populate apply` remains explicitly confirmed and addition-only.
 
 ## Continuing safety boundary
 
-Any new Spotify read requires a separately approved endpoint boundary. Spotify writes and new OAuth scopes
-remain unauthorized. Research remains evidence-only and classification must remain
-independent of the Spotify mutation path. Explicit user decisions outrank generated proposals. SOURCE and
-INBOX sources must never be modified, and playlist names must never confer authority. Future writes, if
-separately implemented and approved in later phases, may target only stable-ID MANAGED playlists through
-the dry-run, approval, addition-only, verification path. Runtime databases, logs, backups, batches, exports,
-research caches, credentials, raw responses, and real music/account metadata must remain outside the
-repository.
+SOURCE and INBOX inputs are immutable. Playlist names never confer authority. Only exact, durably registered,
+policy-confirmed MANAGED targets may be written. There is no removal, replacement, reordering, bulk,
+background, or automatic matching/population path. Runtime databases, credentials, provider responses,
+exports, logs, and real music/account metadata remain outside Git.
+
+## Next repository action
+
+The schema-19 explicit Genre-routing commit is clean on `dev` and may be fast-forwarded to `main` only with
+explicit authorization. Real routing imports and guarded population remain separate supervised operator
+checkpoints.

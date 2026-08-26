@@ -3,7 +3,11 @@
 Each phase ends with tests, exact status/diff, unresolved decisions, and explicit user approval. Work stops
 at every checkpoint. A phase number does not itself authorize service access or external mutations.
 
-Current roadmap status: **PHASES 0–11 COMPLETE. PHASE 12 NOT STARTED.**
+Current roadmap status: **PHASES 0–12 / V1 IMPLEMENTED.** Schema 19 is current. V1 has completed a
+supervised end-to-end Spotify population checkpoint: explicit human review produces desired membership,
+then exact managed-target verification and guarded one-track addition provide the only population path.
+Current execution focuses on small human-reviewed batches and fail-closed population, not broad matching or
+external-provider research expansion.
 
 ## Phase 0 — policy baseline, architecture, skeleton and invariants (complete)
 
@@ -62,7 +66,7 @@ Adds local, auditable review history, explicit include/exclude/abstain decisions
 an effective state where an explicit user decision outranks a generated proposal. Calibration is
 observational reporting only: it never tunes rules or taxonomy. No desired state, routing, or Spotify write
 is created. The completed local checkpoint verified deterministic, conflict-focused queue behavior without
-creating any user decision; Phase 8 follows as the supervised generated-classification boundary.
+creating any user decision. Phase 8 is the supervised generated-classification boundary.
 
 ## Phase 8 — Codex supervised file-exchange classification
 
@@ -78,13 +82,16 @@ excluded, along with Spotify/account/playlist/source identifiers and raw provide
 files are untrusted until strict validation succeeds; no chain-of-thought is requested or persisted. Imports
 are transactional and auditable; deterministic and Codex-generated proposals may coexist, generated-source
 disagreements remain reviewable, identical result replay is idempotent, and explicit user decisions outrank
-all generated proposals. Phase 8 performs no Spotify write, and Phase 9 is next and has not started.
+all generated proposals. Phase 8 performs no Spotify write. Later phases consume only the effective reviewed
+state; they do not give generated proposals direct playlist authority.
 
 ## Phase 9 — desired state / dry-run synchronization
 
 Phase 9 derives concrete desired membership from effective reviewed state only: 36 semantic concepts route to
 51 configured targets. Greek/Foreign routing applies strictly after included Genre semantics through the
-reviewed routing policy; unresolved routing produces no guessed target. It is a local dry-run planner: a
+reviewed routing policy; unresolved routing produces no guessed target. Schema 19 also supports bounded,
+explicit human Greek/Foreign routing decisions; this routing is separate from, and cannot create, Genre
+classification. It is a local dry-run planner: a
 target without an authoritative concrete managed mapping is unprovisioned, authoritative absent membership
 is `would_add`, and present desired membership is `no_op`. Present-but-not-desired membership is informational
 only; no removal is planned or executable. Phase 9 performs zero Spotify writes. Phase 10 owns managed
@@ -174,7 +181,10 @@ Spotify track ingestion does not manufacture `version_label`; evidence status th
 existing deterministic title-marker helper (`live`, `acoustic`, `remix`, `remaster`, `edit`, `explicit`,
 `clean`, and `instrumental`) for reporting only. It distinguishes compatible explicit cues, conflicts,
 neither-side cues, and one-sided/uncertain cues without changing candidate-generation protection.
-The deferred real Phase 11 addition remains deferred until a genuine desired membership exists.
+V1 population has been demonstrated under its guarded path. Practical operation now uses small, explicit
+human-reviewed batches, followed by desired-state inspection and one target + one canonical population applies.
+Ambiguous or unresolved provider mappings remain blocked; no matching-safety relaxation, removal, replacement,
+or bulk/background execution is authorized.
 
 ## Future, separately approved
 

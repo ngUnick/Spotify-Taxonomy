@@ -6,7 +6,8 @@ user-approved assignments. Unknown or insufficient evidence abstains rather than
 probable, contextual, stale, or contradictory evidence is never silently promoted.
 Phase 7 adds auditable user review/overrides and effective reviewed state: explicit user decisions outrank
 generated proposals without erasing them, and clearing a decision reveals its generated state again.
-Calibration is observational only; it never tunes rules or configuration. Phase 8 has not started.
+Calibration is observational only; it never tunes rules or configuration. Phases 8–12 / V1 are implemented;
+current operations remain explicit, supervised, and fail closed.
 live provider access remains an explicit operator action. Phase 4 provides an explicitly human-reviewed, source-controlled
 58-characteristic vocabulary, one reviewed specification for each of the 36 stable semantic playlists,
 centralized overlap guidance, 51 stable future output targets, an approved Greek/Foreign Genre routing
