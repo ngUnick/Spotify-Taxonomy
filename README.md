@@ -131,12 +131,21 @@ For explicit Genre output routing without classifying Genre, use `spotify-taxono
 It accepts 1–250 canonical-specific `greek|foreign` decisions atomically. Inspect the current local state with
 `spotify-taxonomy routing show CANONICAL_ID`; routing affects a desired target only after an effective Genre include.
 
-For practical supervised batches, first inspect up to 100 local rows with
-`spotify-taxonomy catalogue classify worklist --limit 100 --unreviewed-only`. After importing the explicit
-review and any necessary routing decisions, run `spotify-taxonomy populate batch preview CANONICAL_ID...`.
-It prints a deterministic `batch_plan_id` and runs the same live exact-ID preflight as one-track population for
-every current desired membership. Apply that bounded plan with
-`spotify-taxonomy populate batch apply CANONICAL_ID... --confirm APPLY:BATCH_PLAN_ID`.
+For practical supervised batches, inspect up to 250 local rows with
+`spotify-taxonomy catalogue classify worklist --limit 250 --unreviewed-only`. Import a single fully validated,
+atomic `catalogue-classification-batch.v1` file with
+`spotify-taxonomy catalogue classify batch import CLASSIFICATION_BATCH.json`; it records ordinary explicit Phase 7
+decisions and optional explicit Genre routing without conflating them. A separate local-only
+`spotify-taxonomy catalogue classify bulk-review preview --limit 250` identifies only canonicals with all 36 current,
+unambiguous deterministic Phase 6 include/exclude proposals and no unresolved Genre routing; it can be explicitly
+approved with `spotify-taxonomy catalogue classify bulk-review apply --confirm APPROVE:PLAN_ID`.
+
+After import, preview the same file directly with `spotify-taxonomy catalogue run preview CLASSIFICATION_BATCH.json`.
+It reports a deterministic run ID and exact managed-target prerequisites. Apply with
+`spotify-taxonomy catalogue run apply CLASSIFICATION_BATCH.json --confirm APPLY:RUN_ID`; a quota pause can resume as
+`spotify-taxonomy catalogue run resume RUN_ID --confirm RESUME:RUN_ID` without reconstructing canonical IDs. The
+run journal is local runtime state only and never provisions a target as an import side effect.
+
 Within one preview or apply invocation, preflight shares one exact live membership snapshot per managed target;
 the snapshot is never persisted or reused. Apply re-runs preflight, writes one track at a time through the existing
 guarded path, verifies every write by read-back, skips blocked/already-present entries, and stops after an ambiguous

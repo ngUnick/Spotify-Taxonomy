@@ -20,7 +20,7 @@ from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 
 _SPOTIFY_ID = re.compile(r"^[A-Za-z0-9]+$")
 _UNRESOLVED = ("started", "recovery_required")
-BATCH_POPULATION_MAX_CANONICALS = 100
+BATCH_POPULATION_MAX_CANONICALS = 250
 BATCH_POPULATION_PLAN_VERSION = "population-batch.v1"
 
 
@@ -118,6 +118,7 @@ class BatchPopulationOutcome:
     plan_id: str
     canonical_track_ids: tuple[str, ...]
     entries: tuple[PopulationStatus, ...]
+    retry_after_seconds: int | None = None
 
     def count(self, state: str) -> int:
         return sum(item.state == state for item in self.entries)
@@ -228,6 +229,7 @@ class Phase11Service:
         )
         # All exact provider policy and membership reads complete above before any add request.
         outcome_entries: list[PopulationStatus] = []
+        retry_after_seconds: int | None = None
         pending = list(entries)
         while pending:
             item = pending.pop(0)
@@ -261,6 +263,7 @@ class Phase11Service:
                 outcome_entries.extend(next_item for next_item in pending if next_item.state != "would_add")
                 break
             except PopulationQuotaExhausted as error:
+                retry_after_seconds = error.retry_after_seconds
                 outcome_entries.append(PopulationStatus(item.output_target_id, item.canonical_track_id, "blocked", str(error)))
                 outcome_entries.extend(
                     PopulationStatus(next_item.output_target_id, next_item.canonical_track_id, "not_attempted",
@@ -272,7 +275,7 @@ class Phase11Service:
             except PopulationError as error:
                 # A definitively rejected request remains isolated; unrelated safe items may proceed.
                 outcome_entries.append(PopulationStatus(item.output_target_id, item.canonical_track_id, "blocked", str(error)))
-        return BatchPopulationOutcome(expected_plan_id, canonical_ids, tuple(outcome_entries))
+        return BatchPopulationOutcome(expected_plan_id, canonical_ids, tuple(outcome_entries), retry_after_seconds)
 
     def apply(self, target_id: str, canonical_id: str, confirmation: str, *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader, adder: ManagedTrackAdder) -> PopulationStatus:
         if confirmation != f"ADD:{target_id}:{canonical_id}":

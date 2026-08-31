@@ -97,6 +97,12 @@ from spotify_playlist_taxonomy.workflows.research_grounding_acquisition import (
 from spotify_playlist_taxonomy.workflows.phase6 import Phase6Service
 from spotify_playlist_taxonomy.workflows.phase7 import Phase7Service
 from spotify_playlist_taxonomy.workflows.phase7_batch import ReviewBatchValidationError, parse_review_batch
+from spotify_playlist_taxonomy.workflows.catalogue_classification_batch import (
+    CatalogueClassificationBatchService,
+    CatalogueClassificationBatchValidationError,
+    parse_catalogue_classification_batch,
+)
+from spotify_playlist_taxonomy.workflows.bulk_review import BulkReviewService
 from spotify_playlist_taxonomy.workflows.genre_routing import (
     GenreRoutingBatchValidationError,
     GenreRoutingService,
@@ -106,6 +112,7 @@ from spotify_playlist_taxonomy.workflows.phase8 import Phase8Service
 from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 from spotify_playlist_taxonomy.workflows.phase10 import Phase10Service, ProvisioningError, RecoveryRequiredError
 from spotify_playlist_taxonomy.workflows.phase11 import Phase11Service, PopulationError, PopulationRecoveryRequired
+from spotify_playlist_taxonomy.workflows.catalogue_completion import CatalogueCompletionService
 from spotify_playlist_taxonomy.workflows.phase12 import Phase12Service
 from spotify_playlist_taxonomy.workflows.classification_readiness import ClassificationReadinessService
 
@@ -129,6 +136,9 @@ catalogue_match_external_recording_app = typer.Typer(no_args_is_help=True, help=
 catalogue_match_external_recording_detail_app = typer.Typer(no_args_is_help=True, help="Preview local MusicBrainz Recording-detail targets.")
 catalogue_link_app = typer.Typer(no_args_is_help=True, help="Manage explicit canonical identity links.")
 catalogue_classify_app = typer.Typer(no_args_is_help=True, help="Inspect local supervised classification readiness.")
+catalogue_classify_batch_app = typer.Typer(no_args_is_help=True, help="Atomically import combined explicit classification decisions.")
+catalogue_classify_bulk_review_app = typer.Typer(no_args_is_help=True, help="Preview or explicitly approve only mechanically unambiguous current Phase 6 proposals.")
+catalogue_run_app = typer.Typer(no_args_is_help=True, help="Resume bounded guarded population for an imported classification batch.")
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
 research_grounding_app = typer.Typer(no_args_is_help=True, help="Preview local exact external research-subject grounding.")
 research_grounding_acquire_app = typer.Typer(no_args_is_help=True, help="Bounded exact-grounding acquisition for research-ready canonicals.")
@@ -167,6 +177,9 @@ catalogue_match_app.add_typer(catalogue_match_external_recording_app, name="exte
 catalogue_match_external_recording_app.add_typer(catalogue_match_external_recording_detail_app, name="detail")
 catalogue_app.add_typer(catalogue_link_app, name="link")
 catalogue_app.add_typer(catalogue_classify_app, name="classify")
+catalogue_classify_app.add_typer(catalogue_classify_batch_app, name="batch")
+catalogue_classify_app.add_typer(catalogue_classify_bulk_review_app, name="bulk-review")
+catalogue_app.add_typer(catalogue_run_app, name="run")
 app.add_typer(research_app, name="research")
 research_app.add_typer(research_grounding_app, name="grounding")
 research_grounding_app.add_typer(research_grounding_acquire_app, name="acquire")
@@ -382,6 +395,42 @@ def _phase7_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase7
 
 
 @contextmanager
+def _catalogue_classification_batch_service(
+    config_path: Path, data_dir: Path | None,
+) -> Iterator[CatalogueClassificationBatchService]:
+    config_path = config_path.resolve()
+    config, _, _ = _load_documents(config_path)
+    paths = _paths(config, data_dir)
+    if not paths.database_path.is_file():
+        raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 19:
+            raise PersistenceError("database requires migration 19; run 'db init'")
+        yield CatalogueClassificationBatchService(connection, load_phase4_bundle(config_path))
+    finally:
+        connection.close()
+
+
+@contextmanager
+def _bulk_review_service(config_path: Path, data_dir: Path | None) -> Iterator[BulkReviewService]:
+    config_path = config_path.resolve()
+    config, _, _ = _load_documents(config_path)
+    paths = _paths(config, data_dir)
+    if not paths.database_path.is_file():
+        raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 19:
+            raise PersistenceError("database requires migration 19; run 'db init'")
+        yield BulkReviewService(connection, load_phase4_bundle(config_path))
+    finally:
+        connection.close()
+
+
+@contextmanager
 def _genre_routing_service(config_path: Path, data_dir: Path | None) -> Iterator[GenreRoutingService]:
     config_path = config_path.resolve()
     config, _, _ = _load_documents(config_path)
@@ -440,6 +489,18 @@ def _phase11_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase
         assert_integrity(connection)
         if current_schema_version(connection) < 19: raise PersistenceError("database requires migration 19; run 'db init'")
         yield Phase11Service(connection, load_phase4_bundle(config_path))
+    finally: connection.close()
+
+
+@contextmanager
+def _catalogue_completion_service(config_path: Path, data_dir: Path | None) -> Iterator[CatalogueCompletionService]:
+    config_path = config_path.resolve(); config, _, _ = _load_documents(config_path); paths = _paths(config, data_dir)
+    if not paths.database_path.is_file(): raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 20: raise PersistenceError("database requires migration 20; run 'db init'")
+        yield CatalogueCompletionService(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
 @contextmanager
@@ -1276,7 +1337,7 @@ def catalogue_classify_readiness(
 
 @catalogue_classify_app.command("worklist")
 def catalogue_classify_worklist(
-    limit: int = typer.Option(25, "--limit", min=1, max=100),
+    limit: int = typer.Option(25, "--limit", min=1, max=250),
     unreviewed_only: bool = typer.Option(False, "--unreviewed-only"),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
     data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
@@ -1296,6 +1357,154 @@ def catalogue_classify_worklist(
                 f"\texplicit_genre_routing={item.explicit_genre_routing_state}"
             )
     except (OSError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+def _read_catalogue_classification_batch(batch_file: Path) -> tuple[object, tuple[str, ...]]:
+    try:
+        raw = json.loads(batch_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError("catalogue classification batch file is unreadable or invalid JSON") from None
+    tracks = parse_catalogue_classification_batch(raw)
+    return raw, tuple(item.canonical_id for item in tracks)
+
+
+@catalogue_classify_batch_app.command("import")
+def catalogue_classify_batch_import(
+    batch_file: Path = typer.Argument(..., exists=True, dir_okay=False),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Atomically import 1-250 explicit semantic-review and Genre-route track decisions."""
+    try:
+        raw, _ = _read_catalogue_classification_batch(batch_file)
+        tracks = parse_catalogue_classification_batch(raw)
+        with _catalogue_classification_batch_service(config_path, data_dir) as service:
+            outcome = service.apply(tracks)
+        _safe_echo(
+            f"canonical_tracks: {outcome.track_count}\nreview_decisions: {outcome.review_decision_count}\n"
+            f"genre_routes: {outcome.routing_decision_count}\ninclude: {outcome.include_count}\n"
+            f"exclude: {outcome.exclude_count}\nabstain: {outcome.abstain_count}\nstatus: applied"
+        )
+    except (OSError, ValueError, ValidationError, PersistenceError, CatalogueClassificationBatchValidationError) as error:
+        _fail(error)
+
+
+def _render_bulk_review(preview, *, applied: bool) -> None:
+    _safe_echo(f"bulk_review_plan_id: {preview.plan_id}")
+    for state in ("eligible_for_bulk_approval", "manual_review_required", "stale_conflicting_or_ambiguous", "genre_routing_unresolved"):
+        _safe_echo(f"{state}: {preview.count(state)}")
+    _safe_echo(f"status: {'applied' if applied else 'preview'}")
+    for item in preview.items:
+        _safe_echo(f"canonical_id={item.canonical_track_id}\tstate={item.state}\tdecision_count={len(item.decisions)}")
+
+
+@catalogue_classify_bulk_review_app.command("preview")
+def catalogue_classify_bulk_review_preview(
+    limit: int = typer.Option(25, "--limit", min=1, max=250),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Local-only conservative current-Phase-6 approval preview; no decisions are written."""
+    try:
+        with _bulk_review_service(config_path, data_dir) as service:
+            _render_bulk_review(service.preview(limit), applied=False)
+    except (OSError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+@catalogue_classify_bulk_review_app.command("apply")
+def catalogue_classify_bulk_review_apply(
+    confirmation: str = typer.Option(..., "--confirm"),
+    limit: int = typer.Option(25, "--limit", min=1, max=250),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Explicitly approve exactly the current mechanically unambiguous Phase 6 plan."""
+    try:
+        if not confirmation.startswith("APPROVE:"):
+            raise ValueError("explicit confirmation must equal APPROVE:<bulk-review-plan-id>")
+        with _bulk_review_service(config_path, data_dir) as service:
+            _render_bulk_review(service.apply(confirmation.removeprefix("APPROVE:"), limit=limit), applied=True)
+    except (OSError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+def _catalogue_run_operation(service: CatalogueCompletionService, *, apply: bool, resume_id: str | None, canonical_ids: tuple[str, ...], input_digest: str, confirmation: str, resolved: str, config: ApplicationConfig):
+    with _spotify_http_client(config) as http_client:
+        manager = _spotify_auth_manager(config, resolved, http_client)
+        reader = SpotifyReadOnlyAdapter(token_provider=manager, http_client=http_client, max_read_attempts=config.spotify.max_read_attempts)
+        account = reader.read_current_account()
+        binding = service.connection.execute("SELECT binding_id FROM platform_account_bindings WHERE active=1").fetchone()
+        kwargs = {"account_binding_id": None if binding is None else binding["binding_id"], "account_id": account.account_id, "scopes": manager.status().scopes, "reader": reader}
+        if resume_id is not None:
+            return service.resume(resume_id, confirmation, adder=SpotifyManagedTrackAdder(token_provider=manager, http_client=http_client), **kwargs)
+        if apply:
+            return service.apply(canonical_ids, input_digest, confirmation, adder=SpotifyManagedTrackAdder(token_provider=manager, http_client=http_client), **kwargs)
+        return service.preview(canonical_ids, input_digest, **kwargs)
+
+
+def _render_catalogue_run(run, entries, *, applied: bool) -> None:
+    _safe_echo(f"catalogue_run_id: {run.run_id}\nbatch_plan_id: {run.batch_plan_id}\nrun_state: {run.state}")
+    if run.retry_after_seconds is not None:
+        _safe_echo(f"retry_after_seconds: {run.retry_after_seconds}")
+    if run.last_reason:
+        _safe_echo(f"reason: {run.last_reason}")
+    _render_population_batch(run.batch_plan_id, run.canonical_ids, entries, applied=applied)
+
+
+@catalogue_run_app.command("preview")
+def catalogue_run_preview(
+    batch_file: Path = typer.Argument(..., exists=True, dir_okay=False),
+    client_id: str | None = typer.Option(None, "--client-id"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Preflight the imported batch's canonical IDs through the existing managed population rules."""
+    try:
+        raw, canonical_ids = _read_catalogue_classification_batch(batch_file)
+        config, resolved = _population_context(config_path, client_id)
+        with _catalogue_completion_service(config_path, data_dir) as service:
+            run, preview = _catalogue_run_operation(service, apply=False, resume_id=None, canonical_ids=canonical_ids, input_digest=service.input_digest(raw), confirmation="", resolved=resolved, config=config)
+        _render_catalogue_run(run, preview.entries, applied=False)
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError) as error:
+        _fail(error)
+
+
+@catalogue_run_app.command("apply")
+def catalogue_run_apply(
+    batch_file: Path = typer.Argument(..., exists=True, dir_okay=False),
+    confirmation: str = typer.Option(..., "--confirm"),
+    client_id: str | None = typer.Option(None, "--client-id"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Run one imported batch through the existing guarded one-track population writer."""
+    try:
+        raw, canonical_ids = _read_catalogue_classification_batch(batch_file)
+        config, resolved = _population_context(config_path, client_id)
+        with _catalogue_completion_service(config_path, data_dir) as service:
+            run, outcome = _catalogue_run_operation(service, apply=True, resume_id=None, canonical_ids=canonical_ids, input_digest=service.input_digest(raw), confirmation=confirmation, resolved=resolved, config=config)
+        _render_catalogue_run(run, outcome.entries, applied=True)
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError, PopulationRecoveryRequired) as error:
+        _fail(error)
+
+
+@catalogue_run_app.command("resume")
+def catalogue_run_resume(
+    run_id: str = typer.Argument(...),
+    confirmation: str = typer.Option(..., "--confirm"),
+    client_id: str | None = typer.Option(None, "--client-id"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Resume a paused bounded run without reconstructing its canonical-ID list."""
+    try:
+        config, resolved = _population_context(config_path, client_id)
+        with _catalogue_completion_service(config_path, data_dir) as service:
+            run, outcome = _catalogue_run_operation(service, apply=True, resume_id=run_id, canonical_ids=(), input_digest="", confirmation=confirmation, resolved=resolved, config=config)
+        _render_catalogue_run(run, outcome.entries, applied=True)
+    except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError, PopulationRecoveryRequired) as error:
         _fail(error)
 
 

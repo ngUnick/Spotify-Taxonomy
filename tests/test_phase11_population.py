@@ -16,6 +16,7 @@ from spotify_playlist_taxonomy.persistence import SQLiteStateStore, apply_migrat
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3Store
 from spotify_playlist_taxonomy.ports.music_platform import PlatformAccountIdentity, PlatformPlaylistSummary, TrackIdentityPage
 from spotify_playlist_taxonomy.workflows.phase11 import _BatchTargetSnapshot, _Preflight, _TargetPreflight, Phase11Service, PopulationError, PopulationRecoveryRequired
+from spotify_playlist_taxonomy.workflows.catalogue_completion import CatalogueCompletionService
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -219,6 +220,7 @@ class Phase11PopulationTests(unittest.TestCase):
         self.assertEqual(1, outcome.count("blocked"))
         self.assertEqual(1, outcome.count("not_attempted"))
         self.assertEqual(2, len(adder.calls))
+        self.assertEqual(60, outcome.retry_after_seconds)
 
     def test_adapter_posts_one_uri_without_position_and_no_generic_writer_exists(self) -> None:
         seen: dict[str, object] = {}
@@ -241,6 +243,24 @@ class Phase11PopulationTests(unittest.TestCase):
             adapter.add_one_managed_track("playlistsynthetic", "tracksynthetic")
         self.assertEqual(SpotifyErrorKind.QUOTA_EXHAUSTED, raised.exception.kind)
         self.assertEqual(60, raised.exception.retry_after_seconds)
+
+    def test_catalogue_completion_run_persists_quota_pause_and_resumes_idempotently(self) -> None:
+        completion = CatalogueCompletionService(self.connection, self.bundle)
+        canonical_ids, digest = (self.canonical,), "synthetic-input-digest"
+        plan_id = self.service.batch_plan_id(canonical_ids)
+        run = completion._run(canonical_ids, digest, plan_id, "started")
+        quota_reader = _Reader(quota_on_membership_read=1)
+        with self.assertRaises(SpotifyAdapterError):
+            completion.apply(canonical_ids, digest, f"APPLY:{run.run_id}", adder=_Adder(quota_reader), **self._args(quota_reader))
+        self.assertEqual("paused_quota", completion.load(run.run_id).state)
+
+        reader = _Reader(); outcome_run, outcome = completion.resume(run.run_id, f"RESUME:{run.run_id}", adder=_Adder(reader), **self._args(reader))
+        self.assertEqual("complete", outcome_run.state)
+        self.assertEqual(1, outcome.count("confirmed_added"))
+        rerun_reader = _Reader(reader.tracks)
+        rerun_run, rerun = completion.resume(run.run_id, f"RESUME:{run.run_id}", adder=_Adder(rerun_reader), **self._args(rerun_reader))
+        self.assertEqual("complete", rerun_run.state)
+        self.assertEqual(1, rerun.count("already_present"))
 
 
 if __name__ == "__main__": unittest.main()

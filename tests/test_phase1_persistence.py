@@ -37,8 +37,8 @@ class PersistenceTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_migrations_and_taxonomy_sync_are_idempotent(self) -> None:
-        self.assertEqual(19, current_schema_version(self.connection))
-        self.assertEqual(19, apply_migrations(self.connection))
+        self.assertEqual(20, current_schema_version(self.connection))
+        self.assertEqual(20, apply_migrations(self.connection))
         self.assertFalse(sync_taxonomy(self.connection, self.taxonomy))
         state = taxonomy_state(self.connection, self.taxonomy)
         self.assertTrue(state.in_sync)
@@ -279,7 +279,7 @@ class PersistenceTests(unittest.TestCase):
             )
             before = {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in preserved_tables}
 
-            self.assertEqual(19, apply_migrations(connection))
+            self.assertEqual(20, apply_migrations(connection))
             self.assertTrue(sync_taxonomy(connection, self.taxonomy))
             self.assertEqual(before, {
                 table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]

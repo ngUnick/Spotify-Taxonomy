@@ -33,11 +33,18 @@ memberships. Managed Genre, Vibe, and Activity targets have been provisioned as 
 - Explicit Genre routing is canonical-recording scoped and takes precedence over current derived routing.
   It is separate from semantic classification: it is consulted only after an effective included `genre.*`
   decision and cannot create Genre membership by itself.
-- `catalogue classify worklist --limit 1..100 --unreviewed-only` is a local account-scoped selection surface.
-  `populate batch preview CANONICAL_ID...` and `populate batch apply CANONICAL_ID... --confirm APPLY:PLAN_ID`
-  make a bounded up-to-100-canonical population run practical while retaining the existing per-track attempt,
-  provider read-back, recovery, and fail-closed mapping guarantees. A batch shares one live exact-membership
-  snapshot per target only for that invocation; every actual add still has its own journal and provider read-back.
+- `catalogue classify worklist --limit 1..250 --unreviewed-only` is a local account-scoped selection surface.
+  A deliberately skipped canonical reappears because worklist status is semantic-review-event scoped: there is no
+  global "reviewed" marker or defer state that could hide unresolved work without an explicit semantic meaning.
+- `catalogue classify batch import FILE` applies one atomic `catalogue-classification-batch.v1` file of up to 250
+  tracks. Its Phase 7 decisions and optional Genre routes use their ordinary append-only event paths; routing never
+  creates Genre membership. `catalogue classify bulk-review preview|apply` is local-only and eligible only when all
+  36 current deterministic proposals are unambiguous non-abstains, no Phase 8 proposal exists, no explicit review
+  exists, and any included Genre has current explicit routing.
+- `catalogue run preview|apply FILE` uses the already-imported file's canonical IDs without a PowerShell ID list.
+  `catalogue run resume RUN_ID --confirm RESUME:RUN_ID` resumes only the same persisted current plan. Quota stops
+  cleanly; ambiguous outbound additions remain recovery-required and stop later writes. Missing target registration
+  remains a reported prerequisite: classification import never provisions Spotify playlists.
 
 ## Current execution direction
 

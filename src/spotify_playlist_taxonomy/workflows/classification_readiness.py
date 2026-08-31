@@ -204,8 +204,8 @@ class ClassificationReadinessService:
     def worklist(self, limit: int = 25, *, unreviewed_only: bool = False) -> tuple[ClassificationWorklistItem, ...]:
         """Return bounded local human-review rows without consulting match candidates or providers."""
 
-        if not 1 <= limit <= 100:
-            raise ValueError("worklist limit must be between 1 and 100")
+        if not 1 <= limit <= 250:
+            raise ValueError("worklist limit must be between 1 and 250")
         canonical_rows = tuple(self.connection.execute(
             "SELECT canonical_track_id, display_title FROM canonical_tracks ORDER BY canonical_track_id"
         ))
