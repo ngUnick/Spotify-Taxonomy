@@ -27,7 +27,8 @@ class CatalogueOperatorStatus:
     next_action: str
     next_confirmation: str | None
     recovery: CatalogueRecoveryIdentity | None
-    recovery_identity_count: int
+    run_recovery_identity_count: int
+    other_population_recovery_count: int
     durable_confirmed_additions: int
     durable_recovery_required_additions: int
     unreviewed_classification_canonicals: int
@@ -42,13 +43,18 @@ class CatalogueOperatorService:
 
     def status(self) -> CatalogueOperatorStatus:
         run = self._current_run()
-        recoveries = tuple(self.connection.execute(
+        all_recoveries = tuple(self.connection.execute(
             "SELECT output_target_id, canonical_track_id FROM managed_target_addition_attempts "
             "WHERE state IN ('started', 'recovery_required') ORDER BY created_at DESC, attempt_id DESC"
         ))
+        run_recoveries = self._run_recoveries(run, all_recoveries)
+        if run is not None and run.state == "recovery_required":
+            primary_recoveries = run_recoveries
+        else:
+            primary_recoveries = all_recoveries
         recovery = (
-            CatalogueRecoveryIdentity(recoveries[0]["output_target_id"], recoveries[0]["canonical_track_id"])
-            if len(recoveries) == 1 else None
+            CatalogueRecoveryIdentity(primary_recoveries[0]["output_target_id"], primary_recoveries[0]["canonical_track_id"])
+            if len(primary_recoveries) == 1 else None
         )
         confirmed, unresolved = self._durable_addition_counts(run)
         unreviewed = self._unreviewed_count()
@@ -56,14 +62,17 @@ class CatalogueOperatorService:
             "SELECT COUNT(*) FROM managed_target_registrations WHERE state='recovery_required'"
         ).fetchone()[0]
 
-        if recoveries:
+        if primary_recoveries:
             # Multiple records are real but no single recovery command can be safely guessed.
             if recovery is None:
                 action, confirmation = "blocked_manual", None
             else:
                 action, confirmation = "recovery_verify", recovery.confirmation
         elif run is not None and run.state == "recovery_required":
-            if self._recovery_verified(run):
+            if all_recoveries:
+                # The run is resolved, but another global addition recovery still has safety priority.
+                action, confirmation = self._global_recovery_action(all_recoveries)
+            elif self._recovery_verified(run):
                 action, confirmation = "resume_population", f"RESUME:{run.run_id}"
             else:
                 # The run records an unresolved outcome but no exact durable verified recovery exists.
@@ -77,9 +86,25 @@ class CatalogueOperatorService:
         else:
             action, confirmation = "complete", None
         return CatalogueOperatorStatus(
-            run, action, confirmation, recovery, len(recoveries), confirmed, unresolved,
+            run, action, confirmation, recovery, len(run_recoveries), len(all_recoveries) - len(run_recoveries), confirmed, unresolved,
             unreviewed, managed_recovery,
         )
+
+    @staticmethod
+    def _global_recovery_action(recoveries: tuple[sqlite3.Row, ...]) -> tuple[str, str | None]:
+        if len(recoveries) != 1:
+            return "blocked_manual", None
+        item = CatalogueRecoveryIdentity(recoveries[0]["output_target_id"], recoveries[0]["canonical_track_id"])
+        return "recovery_verify", item.confirmation
+
+    @staticmethod
+    def _run_recoveries(
+        run: CatalogueCompletionRun | None, recoveries: tuple[sqlite3.Row, ...],
+    ) -> tuple[sqlite3.Row, ...]:
+        if run is None:
+            return ()
+        run_canonical_ids = set(run.canonical_ids)
+        return tuple(item for item in recoveries if item["canonical_track_id"] in run_canonical_ids)
 
     def _current_run(self) -> CatalogueCompletionRun | None:
         row = self.connection.execute(

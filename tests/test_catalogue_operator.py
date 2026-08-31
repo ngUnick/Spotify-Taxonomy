@@ -89,6 +89,22 @@ class CatalogueOperatorTests(unittest.TestCase):
         self.assertEqual(TARGET, status.recovery.output_target_id if status.recovery else None)
         self.assertEqual(CANONICAL, status.recovery.canonical_track_id if status.recovery else None)
 
+    def test_active_run_recovery_ignores_a_separate_historic_population_recovery(self) -> None:
+        self._run("run.synthetic.recovery", "recovery_required")
+        self._recovery_attempt()
+        other = "canonical.synthetic.operator.historic"
+        SQLiteStateStore(self.connection).save_canonical_track(CanonicalTrack(other, "Synthetic", ("Historic",)))
+        self.connection.execute(
+            "INSERT INTO managed_target_addition_attempts VALUES ('attempt.synthetic.operator.historic', ?, ?, 'identity.synthetic.operator', 'registration.synthetic.operator', 'recovery_required', 'ADD:synthetic', 1, NULL, '2026-01-02T00:00:00Z', NULL)",
+            (TARGET, other),
+        )
+        self.connection.commit()
+        status = self.service.status()
+        self.assertEqual("recovery_verify", status.next_action)
+        self.assertEqual("RECOVER:output.vibe.chill:canonical.synthetic.operator", status.next_confirmation)
+        self.assertEqual(1, status.run_recovery_identity_count)
+        self.assertEqual(1, status.other_population_recovery_count)
+
     def test_verified_recovery_allows_the_persisted_run_to_resume(self) -> None:
         self._recovery_attempt()
         self._run("run.synthetic.recovery", "recovery_required")
@@ -100,6 +116,7 @@ class CatalogueOperatorTests(unittest.TestCase):
 
     def test_multiple_recovery_identities_never_guess_a_command(self) -> None:
         self._recovery_attempt()
+        self._run("run.synthetic.recovery", "recovery_required")
         self.connection.execute(
             "INSERT INTO managed_target_addition_attempts VALUES ('attempt.synthetic.operator.second', ?, ?, 'identity.synthetic.operator', 'registration.synthetic.operator', 'started', 'ADD:synthetic', 0, NULL, '2026-01-02T00:00:00Z', NULL)",
             (TARGET, CANONICAL),
@@ -109,7 +126,7 @@ class CatalogueOperatorTests(unittest.TestCase):
         self.assertEqual("blocked_manual", status.next_action)
         self.assertIsNone(status.recovery)
         self.assertIsNone(status.next_confirmation)
-        self.assertEqual(2, status.recovery_identity_count)
+        self.assertEqual(2, status.run_recovery_identity_count)
 
     def test_completed_without_remaining_work_is_complete_and_selection_is_deterministic(self) -> None:
         self._run("run.synthetic.complete", "complete")
@@ -132,6 +149,18 @@ class CatalogueOperatorTests(unittest.TestCase):
         )
         self.connection.commit()
         self.assertEqual("blocked_manual", self.service.status().next_action)
+
+    def test_run_recovery_remains_primary_over_managed_provisioning_recovery(self) -> None:
+        self._run("run.synthetic.recovery", "recovery_required")
+        self._recovery_attempt()
+        self.connection.execute(
+            "INSERT INTO managed_target_registrations VALUES ('output.activity.driving', 'registration.synthetic.operator.managed', 'spotify', ?, NULL, 'recovery_required', 'phase10_create', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0)",
+            (BINDING,),
+        )
+        self.connection.commit()
+        status = self.service.status()
+        self.assertEqual("recovery_verify", status.next_action)
+        self.assertEqual(1, status.managed_provisioning_recovery_count)
 
     def test_cli_status_is_local_only_and_compact(self) -> None:
         self._canonical()

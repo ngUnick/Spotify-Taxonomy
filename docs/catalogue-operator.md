@@ -29,7 +29,9 @@ After a quota cooldown, the operator may simply say: `Resume.`
    Never retry the ambiguous addition. If read-back confirms membership, use the existing recovery result and then
    resume the persisted catalogue run. If it confirms absence, or `next_action: blocked_manual` is shown, remain
    fail closed and use only an explicit supported recovery procedure. A quota response stops work immediately; record
-   its Retry-After and run ID. When several recovery records exist, status deliberately exposes no guessed pair.
+its Retry-After and run ID. For a `recovery_required` catalogue run, status scopes recovery identities to that
+run's persisted canonical-ID set and reports unrelated population recoveries separately. When the current run itself
+has several recovery records, status deliberately exposes no guessed pair.
 
 3. For `next_action: resume_population`, run exactly the displayed token. Do not reconstruct canonical IDs:
 
@@ -84,5 +86,7 @@ After a quota cooldown, the operator may simply say: `Resume.`
 ## Status truthfulness
 
 `catalogue operator status` reports only durable local facts. Confirmed and unresolved addition-attempt counts are
-available for the selected run. `already_present`, `blocked`, and `not_attempted` batch rows are deliberately not
-persisted, so status labels them unavailable rather than reconstructing or guessing them from historic transcripts.
+available for the selected run. `run_recovery_identity_count` is scoped to that run;
+`other_population_recovery_count` reports separate unresolved addition records without letting them obscure an exact
+current-run recovery. `already_present`, `blocked`, and `not_attempted` batch rows are deliberately not persisted, so
+status labels them unavailable rather than reconstructing or guessing them from historic transcripts.

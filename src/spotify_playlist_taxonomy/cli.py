@@ -1383,7 +1383,8 @@ def _render_catalogue_operator_status(status) -> None:
     _safe_echo(f"next_action: {status.next_action}")
     _safe_echo(f"unreviewed_classification_canonicals: {status.unreviewed_classification_canonicals}")
     _safe_echo(f"managed_provisioning_recovery_count: {status.managed_provisioning_recovery_count}")
-    _safe_echo(f"recovery_identity_count: {status.recovery_identity_count}")
+    _safe_echo(f"run_recovery_identity_count: {status.run_recovery_identity_count}")
+    _safe_echo(f"other_population_recovery_count: {status.other_population_recovery_count}")
     if status.run is None:
         _safe_echo("catalogue_run_id: -")
     else:
@@ -1403,8 +1404,8 @@ def _render_catalogue_operator_status(status) -> None:
     if status.recovery is not None:
         _safe_echo(f"recovery_target_id: {status.recovery.output_target_id}")
         _safe_echo(f"recovery_canonical_id: {status.recovery.canonical_track_id}")
-    elif status.recovery_identity_count > 1:
-        _safe_echo("recovery_identity: unavailable_multiple_persisted_records")
+    elif status.run_recovery_identity_count > 1:
+        _safe_echo("recovery_identity: unavailable_multiple_persisted_records_for_current_run")
     if status.next_confirmation is not None:
         _safe_echo(f"next_confirmation: {status.next_confirmation}")
 
