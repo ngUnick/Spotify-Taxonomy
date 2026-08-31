@@ -262,5 +262,26 @@ class Phase11PopulationTests(unittest.TestCase):
         self.assertEqual("complete", rerun_run.state)
         self.assertEqual(1, rerun.count("already_present"))
 
+    def test_verified_recovery_allows_catalogue_run_resume_without_retrying_the_write(self) -> None:
+        completion = CatalogueCompletionService(self.connection, self.bundle)
+        canonical_ids, digest = (self.canonical,), "synthetic-recovery-digest"
+        run = completion._run(canonical_ids, digest, self.service.batch_plan_id(canonical_ids), "started")
+        reader = _Reader()
+        recovery_run, outcome = completion.apply(
+            canonical_ids, digest, f"APPLY:{run.run_id}", adder=_Adder(reader, count_after=0), **self._args(reader),
+        )
+        self.assertEqual("recovery_required", recovery_run.state)
+        self.assertEqual(1, outcome.count("recovery_required"))
+        reader.tracks = (PlatformTrackIdentity("seen.recovered", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), "tracksynthetic"),)
+        recovered = self.service.recover_verify(
+            self.target, self.canonical, f"RECOVER:{self.target}:{self.canonical}", **self._args(reader),
+        )
+        self.assertEqual("confirmed_recovered", recovered.state)
+        resumed_run, resumed = completion.resume(
+            run.run_id, f"RESUME:{run.run_id}", adder=_Adder(reader), **self._args(reader),
+        )
+        self.assertEqual("complete", resumed_run.state)
+        self.assertEqual(1, resumed.count("already_present"))
+
 
 if __name__ == "__main__": unittest.main()

@@ -3,10 +3,8 @@
 ## Current repository state
 
 - Repository: `C:\Users\USER\Desktop\Projects\Spotify-Taxonomy`
-- Development branch: `dev` at `7fda6777ae2d456fa501cd224f10297e6915d6ee`
-- `main` and `origin/main`: `80d6b8fcc61e7e9972d9da7a5185a2ab8a8c3236`
-- `dev` is one fast-forward commit ahead of `main`; the working tree is clean.
-- Schema: 19
+- Development branch: `dev`; inspect Git before any operator checkpoint rather than relying on this handoff's hash.
+- Schema: 20
 - Taxonomy: `taxonomy.v2`, with 36 reviewed semantic specifications and 51 concrete output targets.
 
 ## Implemented operational path
@@ -45,6 +43,10 @@ memberships. Managed Genre, Vibe, and Activity targets have been provisioned as 
   `catalogue run resume RUN_ID --confirm RESUME:RUN_ID` resumes only the same persisted current plan. Quota stops
   cleanly; ambiguous outbound additions remain recovery-required and stop later writes. Missing target registration
   remains a reported prerequisite: classification import never provisions Spotify playlists.
+- `catalogue operator status` is a compact local-only state-discovery surface. It selects safety-first recovery,
+  then a resumable persisted run, then an unreviewed worklist, then completion. Read
+  [the catalogue operator runbook](catalogue-operator.md) before real operation; it documents the exact recovery,
+  resume, worklist, preview, provisioning, and apply sequence.
 
 ## Current execution direction
 

@@ -113,6 +113,7 @@ from spotify_playlist_taxonomy.workflows.phase9 import Phase9Service
 from spotify_playlist_taxonomy.workflows.phase10 import Phase10Service, ProvisioningError, RecoveryRequiredError
 from spotify_playlist_taxonomy.workflows.phase11 import Phase11Service, PopulationError, PopulationRecoveryRequired
 from spotify_playlist_taxonomy.workflows.catalogue_completion import CatalogueCompletionService
+from spotify_playlist_taxonomy.workflows.catalogue_operator import CatalogueOperatorService
 from spotify_playlist_taxonomy.workflows.phase12 import Phase12Service
 from spotify_playlist_taxonomy.workflows.classification_readiness import ClassificationReadinessService
 
@@ -139,6 +140,7 @@ catalogue_classify_app = typer.Typer(no_args_is_help=True, help="Inspect local s
 catalogue_classify_batch_app = typer.Typer(no_args_is_help=True, help="Atomically import combined explicit classification decisions.")
 catalogue_classify_bulk_review_app = typer.Typer(no_args_is_help=True, help="Preview or explicitly approve only mechanically unambiguous current Phase 6 proposals.")
 catalogue_run_app = typer.Typer(no_args_is_help=True, help="Resume bounded guarded population for an imported classification batch.")
+catalogue_operator_app = typer.Typer(no_args_is_help=True, help="Discover the next safe persisted catalogue-operator action locally.")
 research_app = typer.Typer(no_args_is_help=True, help="Gather and inspect independent recording evidence.")
 research_grounding_app = typer.Typer(no_args_is_help=True, help="Preview local exact external research-subject grounding.")
 research_grounding_acquire_app = typer.Typer(no_args_is_help=True, help="Bounded exact-grounding acquisition for research-ready canonicals.")
@@ -180,6 +182,7 @@ catalogue_app.add_typer(catalogue_classify_app, name="classify")
 catalogue_classify_app.add_typer(catalogue_classify_batch_app, name="batch")
 catalogue_classify_app.add_typer(catalogue_classify_bulk_review_app, name="bulk-review")
 catalogue_app.add_typer(catalogue_run_app, name="run")
+catalogue_app.add_typer(catalogue_operator_app, name="operator")
 app.add_typer(research_app, name="research")
 research_app.add_typer(research_grounding_app, name="grounding")
 research_grounding_app.add_typer(research_grounding_acquire_app, name="acquire")
@@ -501,6 +504,20 @@ def _catalogue_completion_service(config_path: Path, data_dir: Path | None) -> I
         assert_integrity(connection)
         if current_schema_version(connection) < 20: raise PersistenceError("database requires migration 20; run 'db init'")
         yield CatalogueCompletionService(connection, load_phase4_bundle(config_path))
+    finally: connection.close()
+
+
+@contextmanager
+def _catalogue_operator_service(config_path: Path, data_dir: Path | None) -> Iterator[CatalogueOperatorService]:
+    """Open only local persisted state; this command has no auth or provider dependency."""
+
+    config_path = config_path.resolve(); config, _, _ = _load_documents(config_path); paths = _paths(config, data_dir)
+    if not paths.database_path.is_file(): raise PersistenceError("database does not exist; run 'db init'")
+    connection = connect_database(paths.database_path)
+    try:
+        assert_integrity(connection)
+        if current_schema_version(connection) < 20: raise PersistenceError("database requires migration 20; run 'db init'")
+        yield CatalogueOperatorService(connection)
     finally: connection.close()
 
 @contextmanager
@@ -1356,6 +1373,52 @@ def catalogue_classify_worklist(
                 f"\texplicit_review={str(item.explicit_review_exists).lower()}"
                 f"\texplicit_genre_routing={item.explicit_genre_routing_state}"
             )
+    except (OSError, ValueError, ValidationError, PersistenceError) as error:
+        _fail(error)
+
+
+def _render_catalogue_operator_status(status) -> None:
+    """Render compact durable facts only; detailed provider preflight remains separate."""
+
+    _safe_echo(f"next_action: {status.next_action}")
+    _safe_echo(f"unreviewed_classification_canonicals: {status.unreviewed_classification_canonicals}")
+    _safe_echo(f"managed_provisioning_recovery_count: {status.managed_provisioning_recovery_count}")
+    _safe_echo(f"recovery_identity_count: {status.recovery_identity_count}")
+    if status.run is None:
+        _safe_echo("catalogue_run_id: -")
+    else:
+        _safe_echo(f"catalogue_run_id: {status.run.run_id}")
+        _safe_echo(f"batch_plan_id: {status.run.batch_plan_id}")
+        _safe_echo(f"run_state: {status.run.state}")
+        _safe_echo(f"durable_confirmed_additions: {status.durable_confirmed_additions}")
+        _safe_echo(f"durable_recovery_required_additions: {status.durable_recovery_required_additions}")
+        # Batch `already_present`, `blocked`, and `not_attempted` rows are intentionally not persisted.
+        _safe_echo("already_present: unavailable_not_persisted")
+        _safe_echo("blocked: unavailable_not_persisted")
+        _safe_echo("not_attempted: unavailable_not_persisted")
+        if status.run.retry_after_seconds is not None:
+            _safe_echo(f"retry_after_seconds: {status.run.retry_after_seconds}")
+        if status.run.last_reason:
+            _safe_echo(f"run_reason: {status.run.last_reason}")
+    if status.recovery is not None:
+        _safe_echo(f"recovery_target_id: {status.recovery.output_target_id}")
+        _safe_echo(f"recovery_canonical_id: {status.recovery.canonical_track_id}")
+    elif status.recovery_identity_count > 1:
+        _safe_echo("recovery_identity: unavailable_multiple_persisted_records")
+    if status.next_confirmation is not None:
+        _safe_echo(f"next_confirmation: {status.next_confirmation}")
+
+
+@catalogue_operator_app.command("status")
+def catalogue_operator_status(
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False),
+    data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False),
+) -> None:
+    """Summarize the next safe catalogue action using local persisted state only."""
+
+    try:
+        with _catalogue_operator_service(config_path, data_dir) as service:
+            _render_catalogue_operator_status(service.status())
     except (OSError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
 

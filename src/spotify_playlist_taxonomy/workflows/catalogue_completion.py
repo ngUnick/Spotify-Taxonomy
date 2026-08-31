@@ -68,7 +68,7 @@ class CatalogueCompletionService:
         run = self.load(run_id)
         if confirmation != f"RESUME:{run_id}":
             raise ValueError("explicit confirmation must equal RESUME:<catalogue-run-id>")
-        if run.state == "recovery_required":
+        if run.state == "recovery_required" and not self._recovery_verified(run):
             raise ValueError("run contains an ambiguous outbound result; use explicit population recovery verification")
         current_plan_id = self.population.batch_plan_id(run.canonical_ids)
         if current_plan_id != run.batch_plan_id:
@@ -116,6 +116,24 @@ class CatalogueCompletionService:
         if any(item.state == "blocked" and "quota" in item.reason.lower() for item in outcome.entries):
             return "paused_quota", "provider quota exhausted before a later write; resume this run when permitted", outcome.retry_after_seconds
         return "complete", None, None
+
+    def _recovery_verified(self, run: CatalogueCompletionRun) -> bool:
+        """A recovery run may continue only after durable exact read-back resolution."""
+
+        if not run.canonical_ids:
+            return False
+        marks = ",".join("?" for _ in run.canonical_ids)
+        unresolved = self.connection.execute(
+            f"SELECT 1 FROM managed_target_addition_attempts WHERE canonical_track_id IN ({marks}) "
+            "AND state IN ('started', 'recovery_required') LIMIT 1", run.canonical_ids,
+        ).fetchone()
+        if unresolved is not None:
+            return False
+        resolved = self.connection.execute(
+            f"SELECT 1 FROM managed_target_addition_attempts WHERE canonical_track_id IN ({marks}) "
+            "AND state='confirmed_recovered' LIMIT 1", run.canonical_ids,
+        ).fetchone()
+        return resolved is not None
 
     def _upsert(self, run: CatalogueCompletionRun) -> None:
         try:
