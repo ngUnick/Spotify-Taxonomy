@@ -113,6 +113,38 @@ class Phase11PopulationTests(unittest.TestCase):
         self.assertEqual("recovery_required", self.service.preview(self.target, self.canonical, **self._args(reader)).state)
         recovery = self.service.recover_verify(self.target, self.canonical, f"RECOVER:{self.target}:{self.canonical}", **self._args(reader)); self.assertEqual("recovery_required", recovery.state)
 
+    def test_verified_absent_recovery_can_be_explicitly_closed_without_a_provider_write(self) -> None:
+        reader = _Reader()
+        adder = _Adder(reader, count_after=0)
+        with self.assertRaises(PopulationRecoveryRequired):
+            self.service.apply(self.target, self.canonical, f"ADD:{self.target}:{self.canonical}", adder=adder, **self._args(reader))
+        resolved = self.service.resolve_absent(
+            self.target, self.canonical, f"RESOLVE_ABSENT:{self.target}:{self.canonical}",
+        )
+        self.assertEqual("resolved_absent", resolved.state)
+        self.assertEqual(1, len(adder.calls))
+        self.assertEqual("resolved_absent", self.connection.execute(
+            "SELECT state FROM managed_target_addition_attempts"
+        ).fetchone()[0])
+        repeated = self.service.resolve_absent(
+            self.target, self.canonical, f"RESOLVE_ABSENT:{self.target}:{self.canonical}",
+        )
+        self.assertEqual("resolved_absent", repeated.state)
+        self.assertEqual(1, len(adder.calls))
+
+    def test_absent_resolution_requires_exact_verified_absent_recovery(self) -> None:
+        reader = _Reader()
+        with self.assertRaises(PopulationRecoveryRequired):
+            self.service.apply(self.target, self.canonical, f"ADD:{self.target}:{self.canonical}", adder=_Adder(reader, count_after=2), **self._args(reader))
+        with self.assertRaises(PopulationError):
+            self.service.resolve_absent(self.target, self.canonical, f"RESOLVE_ABSENT:{self.target}:{self.canonical}")
+        reader.tracks = (PlatformTrackIdentity("seen.recovered", IdentityProvider.SPOTIFY, "Synthetic", ("Artist",), "tracksynthetic"),)
+        self.service.recover_verify(self.target, self.canonical, f"RECOVER:{self.target}:{self.canonical}", **self._args(reader))
+        with self.assertRaises(PopulationError):
+            self.service.resolve_absent(self.target, self.canonical, f"RESOLVE_ABSENT:{self.target}:{self.canonical}")
+        with self.assertRaises(PopulationError):
+            self.service.resolve_absent(self.target, self.canonical, "wrong")
+
     def test_batch_preview_apply_revalidates_and_preserves_one_track_journaling(self) -> None:
         second = self._additional_desired_membership("second")
         reader = _Reader()

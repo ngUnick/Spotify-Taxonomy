@@ -18,6 +18,10 @@ class CatalogueRecoveryIdentity:
     def confirmation(self) -> str:
         return f"RECOVER:{self.output_target_id}:{self.canonical_track_id}"
 
+    @property
+    def resolve_absent_confirmation(self) -> str:
+        return f"RESOLVE_ABSENT:{self.output_target_id}:{self.canonical_track_id}"
+
 
 @dataclass(frozen=True, slots=True)
 class CatalogueOperatorStatus:
@@ -44,7 +48,8 @@ class CatalogueOperatorService:
     def status(self) -> CatalogueOperatorStatus:
         run = self._current_run()
         all_recoveries = tuple(self.connection.execute(
-            "SELECT output_target_id, canonical_track_id FROM managed_target_addition_attempts "
+            "SELECT output_target_id, canonical_track_id, state, provider_acknowledged, readback_membership_count "
+            "FROM managed_target_addition_attempts "
             "WHERE state IN ('started', 'recovery_required') ORDER BY created_at DESC, attempt_id DESC"
         ))
         run_recoveries = self._run_recoveries(run, all_recoveries)
@@ -66,6 +71,8 @@ class CatalogueOperatorService:
             # Multiple records are real but no single recovery command can be safely guessed.
             if recovery is None:
                 action, confirmation = "blocked_manual", None
+            elif self._is_verified_absent(primary_recoveries[0]):
+                action, confirmation = "recovery_resolve_absent", recovery.resolve_absent_confirmation
             else:
                 action, confirmation = "recovery_verify", recovery.confirmation
         elif run is not None and run.state == "recovery_required":
@@ -95,7 +102,17 @@ class CatalogueOperatorService:
         if len(recoveries) != 1:
             return "blocked_manual", None
         item = CatalogueRecoveryIdentity(recoveries[0]["output_target_id"], recoveries[0]["canonical_track_id"])
+        if CatalogueOperatorService._is_verified_absent(recoveries[0]):
+            return "recovery_resolve_absent", item.resolve_absent_confirmation
         return "recovery_verify", item.confirmation
+
+    @staticmethod
+    def _is_verified_absent(recovery: sqlite3.Row) -> bool:
+        return (
+            recovery["state"] == "recovery_required"
+            and recovery["provider_acknowledged"] == 1
+            and recovery["readback_membership_count"] == 0
+        )
 
     @staticmethod
     def _run_recoveries(

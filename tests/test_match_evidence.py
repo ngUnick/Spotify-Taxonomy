@@ -82,14 +82,14 @@ class MatchEvidenceTests(unittest.TestCase):
                 connection.executescript(migration.sql)
                 connection.execute("INSERT INTO schema_migrations VALUES (?, ?, ?, 'now')", (migration.version, migration.name, migration.checksum))
             connection.commit()
-            self.assertEqual(20, apply_migrations(connection))
+            self.assertEqual(21, apply_migrations(connection))
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("identity_external_entity_evidence", tables)
             self.assertIn("external_entity_detail_evidence", tables)
             self.assertIn("external_entity_detail_isrc_assertions", tables)
             self.assertIn("deterministic_match_decisions", tables)
             connection.close()
-        self.assertEqual(20, apply_migrations(self.connection))
+        self.assertEqual(21, apply_migrations(self.connection))
         self.assertIn(
             "identity_external_entity_evidence",
             {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")},
@@ -1008,7 +1008,7 @@ class MatchEvidenceTests(unittest.TestCase):
             initialized = runner.invoke(app, ["db", "init", *args])
             self.assertEqual(0, initialized.exit_code, initialized.output)
             connection = connect_database(database)
-            self.assertEqual(20, apply_migrations(connection))
+            self.assertEqual(21, apply_migrations(connection))
             self.assertEqual(1, connection.execute("SELECT COUNT(*) FROM schema_migrations WHERE version=19").fetchone()[0])
             self.assertEqual("Synthetic", connection.execute("SELECT display_title FROM canonical_tracks WHERE canonical_track_id='canonical.synthetic.pre15'").fetchone()[0])
             columns = {row[1] for row in connection.execute("PRAGMA table_info(track_identities)")}

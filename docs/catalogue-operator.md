@@ -27,9 +27,17 @@ After a quota cooldown, the operator may simply say: `Resume.`
    ```
 
    Never retry the ambiguous addition. If read-back confirms membership, use the existing recovery result and then
-   resume the persisted catalogue run. If it confirms absence, or `next_action: blocked_manual` is shown, remain
-   fail closed and use only an explicit supported recovery procedure. A quota response stops work immediately; record
-its Retry-After and run ID. For a `recovery_required` catalogue run, status scopes recovery identities to that
+   resume the persisted catalogue run. If it confirms absence, run local operator status again. It will expose the
+   following explicit local closure command when the exact verified-absent journal record is unambiguous:
+
+   ```powershell
+   uv run --offline spotify-taxonomy populate recovery resolve-absent <TARGET_ID> <CANONICAL_ID> RESOLVE_ABSENT:<TARGET_ID>:<CANONICAL_ID>
+   ```
+
+   This only records that the old acknowledged ambiguous addition was authoritatively absent and explicitly closed;
+   it performs no provider action and never retries, deletes, or cleans up. Run operator status again afterward, then
+   resume an eligible run through its separate guarded command. A quota response stops work immediately; record its
+   Retry-After and run ID. For a `recovery_required` catalogue run, status scopes recovery identities to that
 run's persisted canonical-ID set and reports unrelated population recoveries separately. When the current run itself
 has several recovery records, status deliberately exposes no guessed pair.
 

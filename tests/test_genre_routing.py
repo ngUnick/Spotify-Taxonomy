@@ -32,7 +32,7 @@ class GenreRoutingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.connection = connect_database(Path(self.temp.name) / "app.db")
-        self.assertEqual(20, apply_migrations(self.connection))
+        self.assertEqual(21, apply_migrations(self.connection))
         self.bundle = load_phase4_bundle(CONFIG)
         sync_taxonomy(self.connection, self.bundle.taxonomy)
         self.first = "canonical.synthetic.routing.first"
@@ -75,7 +75,7 @@ class GenreRoutingTests(unittest.TestCase):
             )
         connection.commit()
         self.assertEqual(18, current_schema_version(connection))
-        self.assertEqual(20, apply_migrations(connection))
+        self.assertEqual(21, apply_migrations(connection))
         self.assertIn(
             "genre_routing_events",
             {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")},

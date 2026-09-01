@@ -490,7 +490,7 @@ def _phase11_service(config_path: Path, data_dir: Path | None) -> Iterator[Phase
     connection = connect_database(paths.database_path)
     try:
         assert_integrity(connection)
-        if current_schema_version(connection) < 19: raise PersistenceError("database requires migration 19; run 'db init'")
+        if current_schema_version(connection) < 21: raise PersistenceError("database requires migration 21; run 'db init'")
         yield Phase11Service(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
@@ -502,7 +502,7 @@ def _catalogue_completion_service(config_path: Path, data_dir: Path | None) -> I
     connection = connect_database(paths.database_path)
     try:
         assert_integrity(connection)
-        if current_schema_version(connection) < 20: raise PersistenceError("database requires migration 20; run 'db init'")
+        if current_schema_version(connection) < 21: raise PersistenceError("database requires migration 21; run 'db init'")
         yield CatalogueCompletionService(connection, load_phase4_bundle(config_path))
     finally: connection.close()
 
@@ -516,7 +516,7 @@ def _catalogue_operator_service(config_path: Path, data_dir: Path | None) -> Ite
     connection = connect_database(paths.database_path)
     try:
         assert_integrity(connection)
-        if current_schema_version(connection) < 20: raise PersistenceError("database requires migration 20; run 'db init'")
+        if current_schema_version(connection) < 21: raise PersistenceError("database requires migration 21; run 'db init'")
         yield CatalogueOperatorService(connection)
     finally: connection.close()
 
@@ -2761,6 +2761,16 @@ def populate_recovery_verify(target_id: str = typer.Argument(...), canonical_id:
         with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=False, confirmation=confirmation, recovery=True)
         _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count={result.membership_count if result.membership_count is not None else '-'}\treason={result.reason}")
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError) as error: _fail(error)
+
+
+@populate_recovery_app.command("resolve-absent")
+def populate_recovery_resolve_absent(target_id: str = typer.Argument(...), canonical_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
+    """Locally close one exact recovery only after its durable absent verification."""
+    try:
+        with _phase11_service(config_path, data_dir) as service:
+            result = service.resolve_absent(target_id, canonical_id, confirmation)
+        _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count=0\treason={result.reason}")
+    except (OSError, ValueError, ValidationError, PersistenceError, PopulationError) as error: _fail(error)
 
 
 @cycle_app.command("status")

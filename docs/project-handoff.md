@@ -4,7 +4,7 @@
 
 - Repository: `C:\Users\USER\Desktop\Projects\Spotify-Taxonomy`
 - Development branch: `dev`; inspect Git before any operator checkpoint rather than relying on this handoff's hash.
-- Schema: 20
+- Schema: 21
 - Taxonomy: `taxonomy.v2`, with 36 reviewed semantic specifications and 51 concrete output targets.
 
 ## Implemented operational path
@@ -47,6 +47,9 @@ memberships. Managed Genre, Vibe, and Activity targets have been provisioned as 
   then a resumable persisted run, then an unreviewed worklist, then completion. Read
   [the catalogue operator runbook](catalogue-operator.md) before real operation; it documents the exact recovery,
   resume, worklist, preview, provisioning, and apply sequence.
+- `populate recovery resolve-absent TARGET CANONICAL RESOLVE_ABSENT:TARGET:CANONICAL` is a local-only explicit
+  terminal closure for exactly one provider-acknowledged recovery whose durable recovery verification found zero
+  membership. It never retries or changes Spotify; a later desired addition requires a separate normal guarded path.
 
 ## Current execution direction
 

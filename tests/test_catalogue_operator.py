@@ -26,7 +26,7 @@ class CatalogueOperatorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.connection = connect_database(Path(self.temp.name) / "app.db")
-        self.assertEqual(20, apply_migrations(self.connection))
+        self.assertEqual(21, apply_migrations(self.connection))
         self.bundle = load_phase4_bundle(CONFIG)
         sync_taxonomy(self.connection, self.bundle.taxonomy)
         self.service = CatalogueOperatorService(self.connection)
@@ -62,6 +62,13 @@ class CatalogueOperatorTests(unittest.TestCase):
         self.connection.execute(
             "INSERT INTO managed_target_addition_attempts VALUES ('attempt.synthetic.operator', ?, ?, 'identity.synthetic.operator', 'registration.synthetic.operator', 'recovery_required', 'ADD:synthetic', 1, NULL, '2026-01-01T00:00:00Z', NULL)",
             (target, canonical),
+        )
+        self.connection.commit()
+
+    def _mark_verified_absent(self) -> None:
+        self.connection.execute(
+            "UPDATE managed_target_addition_attempts SET provider_acknowledged=1, readback_membership_count=0 "
+            "WHERE attempt_id='attempt.synthetic.operator'"
         )
         self.connection.commit()
 
@@ -105,6 +112,14 @@ class CatalogueOperatorTests(unittest.TestCase):
         self.assertEqual(1, status.run_recovery_identity_count)
         self.assertEqual(1, status.other_population_recovery_count)
 
+    def test_verified_absent_recovery_requires_explicit_local_resolution(self) -> None:
+        self._run("run.synthetic.recovery", "recovery_required")
+        self._recovery_attempt()
+        self._mark_verified_absent()
+        status = self.service.status()
+        self.assertEqual("recovery_resolve_absent", status.next_action)
+        self.assertEqual("RESOLVE_ABSENT:output.vibe.chill:canonical.synthetic.operator", status.next_confirmation)
+
     def test_verified_recovery_allows_the_persisted_run_to_resume(self) -> None:
         self._recovery_attempt()
         self._run("run.synthetic.recovery", "recovery_required")
@@ -113,6 +128,22 @@ class CatalogueOperatorTests(unittest.TestCase):
         status = self.service.status()
         self.assertEqual("resume_population", status.next_action)
         self.assertEqual("RESUME:run.synthetic.recovery", status.next_confirmation)
+
+    def test_resolved_absent_historic_recovery_no_longer_blocks_verified_active_run(self) -> None:
+        self._recovery_attempt()
+        self._run("run.synthetic.recovery", "recovery_required")
+        self.connection.execute("UPDATE managed_target_addition_attempts SET state='confirmed_recovered', readback_membership_count=1")
+        self.connection.commit()
+        other = "canonical.synthetic.operator.resolved"
+        SQLiteStateStore(self.connection).save_canonical_track(CanonicalTrack(other, "Synthetic", ("Resolved",)))
+        self.connection.execute(
+            "INSERT INTO managed_target_addition_attempts VALUES ('attempt.synthetic.operator.resolved', ?, ?, 'identity.synthetic.operator', 'registration.synthetic.operator', 'resolved_absent', 'ADD:synthetic', 1, 0, '2026-01-02T00:00:00Z', '2026-01-02T00:00:01Z')",
+            (TARGET, other),
+        )
+        self.connection.commit()
+        status = self.service.status()
+        self.assertEqual("resume_population", status.next_action)
+        self.assertEqual(0, status.other_population_recovery_count)
 
     def test_multiple_recovery_identities_never_guess_a_command(self) -> None:
         self._recovery_attempt()
@@ -174,6 +205,22 @@ class CatalogueOperatorTests(unittest.TestCase):
         self.assertEqual(0, result.exit_code, result.output)
         self.assertIn("next_action: generate_worklist", result.output)
         self.assertIn("unreviewed_classification_canonicals: 1", result.output)
+
+    def test_cli_resolve_absent_is_local_only(self) -> None:
+        self._recovery_attempt()
+        self._mark_verified_absent()
+        data_dir = Path(self.temp.name) / "runtime"
+        (data_dir / "state").mkdir(parents=True)
+        target = connect_database(data_dir / "state" / "app.db")
+        self.connection.backup(target)
+        target.close()
+        with patch("spotify_playlist_taxonomy.cli.SpotifyReadOnlyAdapter", side_effect=AssertionError("provider access is forbidden")):
+            result = CliRunner().invoke(app, [
+                "populate", "recovery", "resolve-absent", TARGET, CANONICAL,
+                f"RESOLVE_ABSENT:{TARGET}:{CANONICAL}", "--config", str(CONFIG), "--data-dir", str(data_dir),
+            ])
+        self.assertEqual(0, result.exit_code, result.output)
+        self.assertIn("state=resolved_absent", result.output)
 
 
 if __name__ == "__main__":

@@ -334,9 +334,7 @@ class Phase11Service:
     def recover_verify(self, target_id: str, canonical_id: str, confirmation: str, *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader) -> PopulationStatus:
         if confirmation != f"RECOVER:{target_id}:{canonical_id}":
             raise PopulationError("explicit recovery confirmation must equal RECOVER:<target-id>:<canonical-id>")
-        attempt = self._unresolved(target_id, canonical_id)
-        if attempt is None:
-            raise PopulationError("no unresolved managed addition attempt exists")
+        attempt = self._exact_unresolved_recovery(target_id, canonical_id)
         item = self._preflight(target_id, canonical_id, account_binding_id=account_binding_id, account_id=account_id, scopes=scopes, reader=reader)
         if item.membership_count == 1:
             self._finalize(attempt["attempt_id"], "confirmed_recovered", acknowledged=True, count=1)
@@ -344,6 +342,46 @@ class Phase11Service:
         self._recover(attempt["attempt_id"], item.membership_count)
         reason = "membership remains absent" if item.membership_count == 0 else "duplicate membership remains unresolved"
         return PopulationStatus(target_id, canonical_id, "recovery_required", f"{reason}; automatic retry and cleanup are disabled", item.membership_count, item.required_scopes)
+
+    def resolve_absent(self, target_id: str, canonical_id: str, confirmation: str) -> PopulationStatus:
+        """Explicitly close a durably verified-absent ambiguous addition without provider I/O."""
+
+        if confirmation != f"RESOLVE_ABSENT:{target_id}:{canonical_id}":
+            raise PopulationError("explicit resolution confirmation must equal RESOLVE_ABSENT:<target-id>:<canonical-id>")
+        self._target(target_id)
+        self._canonical(canonical_id)
+        attempts = tuple(self.connection.execute(
+            "SELECT * FROM managed_target_addition_attempts WHERE output_target_id=? AND canonical_track_id=? "
+            "AND state='recovery_required'", (target_id, canonical_id),
+        ))
+        if len(attempts) > 1:
+            raise PopulationError("multiple unresolved managed addition attempts exist; explicit recovery identity is ambiguous")
+        if len(attempts) == 1:
+            attempt = attempts[0]
+            if attempt["provider_acknowledged"] != 1 or attempt["readback_membership_count"] != 0:
+                raise PopulationError("recovery has not been authoritatively verified absent")
+            try:
+                result = self.connection.execute(
+                    "UPDATE managed_target_addition_attempts SET state='resolved_absent', completed_at=? "
+                    "WHERE attempt_id=? AND state='recovery_required' AND provider_acknowledged=1 "
+                    "AND readback_membership_count=0",
+                    (utc_now(), attempt["attempt_id"]),
+                )
+                if result.rowcount != 1:
+                    raise sqlite3.DatabaseError("managed addition recovery changed")
+                self.connection.commit()
+            except sqlite3.Error as error:
+                self.connection.rollback()
+                raise PopulationError("unable to resolve verified-absent managed addition recovery") from error
+            return PopulationStatus(target_id, canonical_id, "resolved_absent", "operator explicitly closed a provider-acknowledged addition after authoritative absent verification; no retry occurred", 0)
+
+        resolved = tuple(self.connection.execute(
+            "SELECT * FROM managed_target_addition_attempts WHERE output_target_id=? AND canonical_track_id=? "
+            "AND state='resolved_absent'", (target_id, canonical_id),
+        ))
+        if len(resolved) != 1 or self._later_population_attempt_exists(resolved[0]):
+            raise PopulationError("no uniquely resolved verified-absent managed addition recovery exists")
+        return PopulationStatus(target_id, canonical_id, "resolved_absent", "verified-absent recovery was already explicitly closed; no retry occurred", 0)
 
     def _preflight(self, target_id: str, canonical_id: str, *, account_binding_id: str | None, account_id: str | None, scopes: tuple[str, ...], reader: MusicPlatformReader) -> _Preflight:
         self._target(target_id); self._canonical(canonical_id)
@@ -493,6 +531,27 @@ class Phase11Service:
 
     def _unresolved(self, target_id: str, canonical_id: str):
         return self.connection.execute("SELECT * FROM managed_target_addition_attempts WHERE output_target_id=? AND canonical_track_id=? AND state IN ('started', 'recovery_required') ORDER BY created_at DESC LIMIT 1", (target_id, canonical_id)).fetchone()
+
+    def _exact_unresolved_recovery(self, target_id: str, canonical_id: str):
+        attempts = tuple(self.connection.execute(
+            "SELECT * FROM managed_target_addition_attempts WHERE output_target_id=? AND canonical_track_id=? "
+            "AND state IN ('started', 'recovery_required')", (target_id, canonical_id),
+        ))
+        if not attempts:
+            raise PopulationError("no unresolved managed addition attempt exists")
+        if len(attempts) != 1:
+            raise PopulationError("multiple unresolved managed addition attempts exist; explicit recovery identity is ambiguous")
+        return attempts[0]
+
+    def _later_population_attempt_exists(self, resolved: sqlite3.Row) -> bool:
+        completed_at = resolved["completed_at"]
+        if completed_at is None:
+            return True
+        return self.connection.execute(
+            "SELECT 1 FROM managed_target_addition_attempts WHERE output_target_id=? AND canonical_track_id=? "
+            "AND attempt_id<>? AND created_at>=? LIMIT 1",
+            (resolved["output_target_id"], resolved["canonical_track_id"], resolved["attempt_id"], completed_at),
+        ).fetchone() is not None
 
     def _finalize(self, attempt_id: str, state: str, *, acknowledged: bool, count: int | None) -> None:
         try:
