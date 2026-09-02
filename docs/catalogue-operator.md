@@ -11,6 +11,27 @@ classifier. Runtime data, credentials, and provider responses remain outside Git
 
 After a quota cooldown, the operator may simply say: `Resume.`
 
+## Single live mutation writer
+
+Several Codex chats or shells may inspect the same runtime, but exactly one may execute a guarded catalogue or
+managed-target mutation at a time. The application owns an OS-backed lock scoped to the runtime data directory for
+the full preflight -> journal -> provider dispatch -> read-back -> durable-finalization sequence. `catalogue operator
+status` remains local/read-only and reports `mutation_lock_state`; when it is `held`, its only safe next action is
+`wait_for_active_writer`.
+
+Always run operator status first. If another writer is live, stop and wait; do not invoke resume, apply, provisioning,
+or recovery verification/resolution concurrently. After that writer exits, run status again and follow the persisted
+state it reports.
+
+When Codex returns a mutation command as a live asynchronous runner session, retain its session/PID and wait or poll
+until the underlying subprocess has positively terminated. Wrapper/task completion without subprocess termination
+evidence is insufficient. Never begin recovery verification while the population command that exposed that recovery
+could still be running.
+
+If a process crashes, the operating system releases its lock. That only permits a later operator to inspect persisted
+state; it never proves an in-flight Spotify write failed and never authorizes a retry. Existing durable journal and
+recovery procedures remain authoritative.
+
 ## State machine
 
 1. Start with the local-only command below. It performs no authentication, provider call, or mutation.

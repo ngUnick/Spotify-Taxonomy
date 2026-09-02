@@ -66,7 +66,12 @@ from spotify_playlist_taxonomy.adapters.research import (
 )
 from spotify_playlist_taxonomy.domain.research import SufficiencyState
 from spotify_playlist_taxonomy.persistence.phase3 import Phase3StateError, Phase3Store
-from spotify_playlist_taxonomy.runtime import RuntimePaths, discover_repository_root
+from spotify_playlist_taxonomy.runtime import (
+    MutationLockStatus,
+    RuntimeMutationLock,
+    RuntimePaths,
+    discover_repository_root,
+)
 from spotify_playlist_taxonomy.workflows.phase3 import Phase3Coordinator
 from spotify_playlist_taxonomy.workflows.review import Phase3ReviewService
 from spotify_playlist_taxonomy.workflows.match_evidence import MatchEvidenceService
@@ -220,6 +225,18 @@ def _paths(config: ApplicationConfig, data_dir: Path | None) -> RuntimePaths:
         database_filename=config.database_filename,
         repository_root=discover_repository_root(Path.cwd()),
     )
+
+
+@contextmanager
+def _catalogue_mutation_lock(
+    config_path: Path, data_dir: Path | None, purpose: str,
+) -> Iterator[None]:
+    """Own one runtime's live population/provisioning writer for an invocation."""
+
+    config, _, _ = _load_documents(config_path.resolve())
+    paths = _paths(config, data_dir)
+    with RuntimeMutationLock(paths.root, purpose):
+        yield
 
 
 def _configure_file_logging(config: ApplicationConfig, paths: RuntimePaths) -> None:
@@ -1380,6 +1397,10 @@ def catalogue_classify_worklist(
 def _render_catalogue_operator_status(status) -> None:
     """Render compact durable facts only; detailed provider preflight remains separate."""
 
+    _safe_echo(f"mutation_lock_state: {status.mutation_lock_state}")
+    _safe_echo(f"mutation_lock_holder_pid: {status.mutation_lock_holder_pid if status.mutation_lock_holder_pid is not None else '-'}")
+    _safe_echo(f"mutation_lock_purpose: {status.mutation_lock_purpose or '-'}")
+    _safe_echo(f"mutation_lock_acquired_at: {status.mutation_lock_acquired_at or '-'}")
     _safe_echo(f"next_action: {status.next_action}")
     _safe_echo(f"unreviewed_classification_canonicals: {status.unreviewed_classification_canonicals}")
     _safe_echo(f"managed_provisioning_recovery_count: {status.managed_provisioning_recovery_count}")
@@ -1418,8 +1439,10 @@ def catalogue_operator_status(
     """Summarize the next safe catalogue action using local persisted state only."""
 
     try:
+        config, _, _ = _load_documents(config_path.resolve())
+        lock_status = RuntimeMutationLock.inspect(_paths(config, data_dir).root)
         with _catalogue_operator_service(config_path, data_dir) as service:
-            _render_catalogue_operator_status(service.status())
+            _render_catalogue_operator_status(service.status(lock_status))
     except (OSError, ValueError, ValidationError, PersistenceError) as error:
         _fail(error)
 
@@ -1545,10 +1568,11 @@ def catalogue_run_apply(
 ) -> None:
     """Run one imported batch through the existing guarded one-track population writer."""
     try:
-        raw, canonical_ids = _read_catalogue_classification_batch(batch_file)
-        config, resolved = _population_context(config_path, client_id)
-        with _catalogue_completion_service(config_path, data_dir) as service:
-            run, outcome = _catalogue_run_operation(service, apply=True, resume_id=None, canonical_ids=canonical_ids, input_digest=service.input_digest(raw), confirmation=confirmation, resolved=resolved, config=config)
+        with _catalogue_mutation_lock(config_path, data_dir, "catalogue_run_apply"):
+            raw, canonical_ids = _read_catalogue_classification_batch(batch_file)
+            config, resolved = _population_context(config_path, client_id)
+            with _catalogue_completion_service(config_path, data_dir) as service:
+                run, outcome = _catalogue_run_operation(service, apply=True, resume_id=None, canonical_ids=canonical_ids, input_digest=service.input_digest(raw), confirmation=confirmation, resolved=resolved, config=config)
         _render_catalogue_run(run, outcome.entries, applied=True)
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError, PopulationRecoveryRequired) as error:
         _fail(error)
@@ -1564,9 +1588,10 @@ def catalogue_run_resume(
 ) -> None:
     """Resume a paused bounded run without reconstructing its canonical-ID list."""
     try:
-        config, resolved = _population_context(config_path, client_id)
-        with _catalogue_completion_service(config_path, data_dir) as service:
-            run, outcome = _catalogue_run_operation(service, apply=True, resume_id=run_id, canonical_ids=(), input_digest="", confirmation=confirmation, resolved=resolved, config=config)
+        with _catalogue_mutation_lock(config_path, data_dir, "catalogue_run_resume"):
+            config, resolved = _population_context(config_path, client_id)
+            with _catalogue_completion_service(config_path, data_dir) as service:
+                run, outcome = _catalogue_run_operation(service, apply=True, resume_id=run_id, canonical_ids=(), input_digest="", confirmation=confirmation, resolved=resolved, config=config)
         _render_catalogue_run(run, outcome.entries, applied=True)
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError, PopulationRecoveryRequired) as error:
         _fail(error)
@@ -2613,18 +2638,19 @@ def managed_provision_preview(target_id: str = typer.Argument(...), client_id: s
 def managed_provision_apply(target_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
     """Create one confirmed public=false non-collaborative playlist and register its identity."""
     try:
-        config, _, _ = _load_documents(config_path); resolved = resolve_client_id(client_id)
-        with _phase10_service(config_path, data_dir) as service:
-            binding = service.connection.execute("SELECT binding_id FROM platform_account_bindings WHERE active=1").fetchone()
-            binding_id = None if binding is None else binding["binding_id"]
-            with _spotify_http_client(config) as http_client:
-                manager = _spotify_auth_manager(config, resolved, http_client)
-                status = manager.status()
-                if PROVISIONING_SCOPE not in status.scopes:
-                    raise ProvisioningError("reauthorization with --managed-provisioning is required")
-                reader = SpotifyReadOnlyAdapter(token_provider=manager, http_client=http_client, max_read_attempts=config.spotify.max_read_attempts)
-                account = reader.read_current_account()
-                result = service.apply(target_id, confirmation, account_binding_id=binding_id, account_id=account.account_id, scopes=status.scopes, creator=SpotifyManagedPlaylistProvisioner(token_provider=manager, http_client=http_client))
+        with _catalogue_mutation_lock(config_path, data_dir, "managed_provision_apply"):
+            config, _, _ = _load_documents(config_path); resolved = resolve_client_id(client_id)
+            with _phase10_service(config_path, data_dir) as service:
+                binding = service.connection.execute("SELECT binding_id FROM platform_account_bindings WHERE active=1").fetchone()
+                binding_id = None if binding is None else binding["binding_id"]
+                with _spotify_http_client(config) as http_client:
+                    manager = _spotify_auth_manager(config, resolved, http_client)
+                    status = manager.status()
+                    if PROVISIONING_SCOPE not in status.scopes:
+                        raise ProvisioningError("reauthorization with --managed-provisioning is required")
+                    reader = SpotifyReadOnlyAdapter(token_provider=manager, http_client=http_client, max_read_attempts=config.spotify.max_read_attempts)
+                    account = reader.read_current_account()
+                    result = service.apply(target_id, confirmation, account_binding_id=binding_id, account_id=account.account_id, scopes=status.scopes, creator=SpotifyManagedPlaylistProvisioner(token_provider=manager, http_client=http_client))
         _safe_echo(f"target={result.output_target_id}\tstate={result.state}\tprovider_playlist={mask_identifier(result.provider_playlist_id) if result.provider_playlist_id else '-'}\treason={result.reason}")
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, ProvisioningError, RecoveryRequiredError) as error: _fail(error)
 
@@ -2633,11 +2659,12 @@ def managed_provision_apply(target_id: str = typer.Argument(...), confirmation: 
 def managed_verify(target_id: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
     """Read and verify only the exact registered managed playlist; no provider write occurs."""
     try:
-        config, _, _ = _load_documents(config_path); resolved = resolve_client_id(client_id)
-        with _phase10_service(config_path, data_dir) as service, _spotify_http_client(config) as http_client:
-            manager = _spotify_auth_manager(config, resolved, http_client)
-            reader = SpotifyReadOnlyAdapter(token_provider=manager, http_client=http_client, max_read_attempts=config.spotify.max_read_attempts)
-            result = service.verify_policy(target_id, reader)
+        with _catalogue_mutation_lock(config_path, data_dir, "managed_policy_verify"):
+            config, _, _ = _load_documents(config_path); resolved = resolve_client_id(client_id)
+            with _phase10_service(config_path, data_dir) as service, _spotify_http_client(config) as http_client:
+                manager = _spotify_auth_manager(config, resolved, http_client)
+                reader = SpotifyReadOnlyAdapter(token_provider=manager, http_client=http_client, max_read_attempts=config.spotify.max_read_attempts)
+                result = service.verify_policy(target_id, reader)
         _safe_echo(f"target={result.output_target_id}\tpolicy_confirmed={result.policy_confirmed}\tpublic={result.public_state}\tcollaborative={result.collaborative_state}\tname_matches={result.name_matches}\tdescription_matches={result.description_matches}")
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, ProvisioningError) as error: _fail(error)
 
@@ -2648,8 +2675,9 @@ def managed_verify(target_id: str = typer.Argument(...), client_id: str | None =
 def managed_recovery_abandon(target_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
     """Locally preserve an unknown attempt after exact operator acknowledgement; no provider call occurs."""
     try:
-        with _phase10_service(config_path, data_dir) as service:
-            status = service.abandon_unknown(target_id, confirmation)
+        with _catalogue_mutation_lock(config_path, data_dir, "managed_recovery_abandon"):
+            with _phase10_service(config_path, data_dir) as service:
+                status = service.abandon_unknown(target_id, confirmation)
         _safe_echo(f"target={status.output_target_id}\tstate={status.state}\treason={status.reason}")
     except (OSError, ValueError, ValidationError, PersistenceError, ProvisioningError) as error: _fail(error)
 
@@ -2725,8 +2753,9 @@ def populate_preview(target_id: str = typer.Argument(...), canonical_id: str = t
 def populate_apply(target_id: str = typer.Argument(...), canonical_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
     """Append exactly one confirmed desired track to its exact managed destination."""
     try:
-        config, resolved = _population_context(config_path, client_id)
-        with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=True, confirmation=confirmation)
+        with _catalogue_mutation_lock(config_path, data_dir, "populate_apply"):
+            config, resolved = _population_context(config_path, client_id)
+            with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=True, confirmation=confirmation)
         _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count={result.membership_count if result.membership_count is not None else '-'}\treason={result.reason}")
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError, PopulationRecoveryRequired) as error: _fail(error)
 
@@ -2746,9 +2775,10 @@ def populate_batch_preview(canonical_ids: list[str] = typer.Argument(...), clien
 def populate_batch_apply(canonical_ids: list[str] = typer.Argument(...), confirmation: str = typer.Option(..., "--confirm"), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
     """Revalidate and apply one bounded batch using the existing one-track guarded writer."""
     try:
-        config, resolved = _population_context(config_path, client_id)
-        with _phase11_service(config_path, data_dir) as service:
-            result = _populate_batch_operation(service, tuple(canonical_ids), resolved, config, apply=True, confirmation=confirmation)
+        with _catalogue_mutation_lock(config_path, data_dir, "populate_batch_apply"):
+            config, resolved = _population_context(config_path, client_id)
+            with _phase11_service(config_path, data_dir) as service:
+                result = _populate_batch_operation(service, tuple(canonical_ids), resolved, config, apply=True, confirmation=confirmation)
         _render_population_batch(result.plan_id, result.canonical_track_ids, result.entries, applied=True)
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError, PopulationRecoveryRequired) as error: _fail(error)
 
@@ -2757,8 +2787,9 @@ def populate_batch_apply(canonical_ids: list[str] = typer.Argument(...), confirm
 def populate_recovery_verify(target_id: str = typer.Argument(...), canonical_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), client_id: str | None = typer.Option(None, "--client-id"), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
     """Read-only verification of an unresolved one-track managed addition."""
     try:
-        config, resolved = _population_context(config_path, client_id)
-        with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=False, confirmation=confirmation, recovery=True)
+        with _catalogue_mutation_lock(config_path, data_dir, "populate_recovery_verify"):
+            config, resolved = _population_context(config_path, client_id)
+            with _phase11_service(config_path, data_dir) as service: result = _populate_operation(service, target_id, canonical_id, resolved, config, apply=False, confirmation=confirmation, recovery=True)
         _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count={result.membership_count if result.membership_count is not None else '-'}\treason={result.reason}")
     except (OSError, ValueError, ValidationError, PersistenceError, SpotifyAdapterError, PopulationError) as error: _fail(error)
 
@@ -2767,8 +2798,9 @@ def populate_recovery_verify(target_id: str = typer.Argument(...), canonical_id:
 def populate_recovery_resolve_absent(target_id: str = typer.Argument(...), canonical_id: str = typer.Argument(...), confirmation: str = typer.Argument(...), config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, "--config", exists=True, dir_okay=False), data_dir: Path | None = typer.Option(None, "--data-dir", file_okay=False)) -> None:
     """Locally close one exact recovery only after its durable absent verification."""
     try:
-        with _phase11_service(config_path, data_dir) as service:
-            result = service.resolve_absent(target_id, canonical_id, confirmation)
+        with _catalogue_mutation_lock(config_path, data_dir, "populate_recovery_resolve_absent"):
+            with _phase11_service(config_path, data_dir) as service:
+                result = service.resolve_absent(target_id, canonical_id, confirmation)
         _safe_echo(f"target={result.output_target_id}\tcanonical={result.canonical_track_id}\tstate={result.state}\tmembership_count=0\treason={result.reason}")
     except (OSError, ValueError, ValidationError, PersistenceError, PopulationError) as error: _fail(error)
 

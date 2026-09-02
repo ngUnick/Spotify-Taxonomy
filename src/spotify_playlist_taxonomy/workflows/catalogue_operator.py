@@ -6,6 +6,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
+from spotify_playlist_taxonomy.runtime import MutationLockStatus
 from spotify_playlist_taxonomy.workflows.catalogue_completion import CatalogueCompletionRun
 
 
@@ -37,6 +38,10 @@ class CatalogueOperatorStatus:
     durable_recovery_required_additions: int
     unreviewed_classification_canonicals: int
     managed_provisioning_recovery_count: int
+    mutation_lock_state: str
+    mutation_lock_holder_pid: int | None
+    mutation_lock_purpose: str | None
+    mutation_lock_acquired_at: str | None
 
 
 class CatalogueOperatorService:
@@ -45,7 +50,8 @@ class CatalogueOperatorService:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
 
-    def status(self) -> CatalogueOperatorStatus:
+    def status(self, mutation_lock: MutationLockStatus | None = None) -> CatalogueOperatorStatus:
+        mutation_lock = mutation_lock or MutationLockStatus("free")
         run = self._current_run()
         all_recoveries = tuple(self.connection.execute(
             "SELECT output_target_id, canonical_track_id, state, provider_acknowledged, readback_membership_count "
@@ -92,9 +98,12 @@ class CatalogueOperatorService:
             action, confirmation = "generate_worklist", None
         else:
             action, confirmation = "complete", None
+        if mutation_lock.state == "held":
+            action, confirmation = "wait_for_active_writer", None
         return CatalogueOperatorStatus(
             run, action, confirmation, recovery, len(run_recoveries), len(all_recoveries) - len(run_recoveries), confirmed, unresolved,
-            unreviewed, managed_recovery,
+            unreviewed, managed_recovery, mutation_lock.state, mutation_lock.holder_pid,
+            mutation_lock.holder_purpose, mutation_lock.acquired_at,
         )
 
     @staticmethod
