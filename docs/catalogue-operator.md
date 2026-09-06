@@ -11,6 +11,27 @@ classifier. Runtime data, credentials, and provider responses remain outside Git
 
 After a quota cooldown, the operator may simply say: `Resume.`
 
+## Resume means continuous completion
+
+In this dedicated operator context, `Resume` means: resume from persisted state and **keep looping** through this
+runbook until a true stop condition occurs. It is standing authorization for every routine action already permitted
+here; the application's exact confirmation tokens still apply where required.
+
+It never means one batch, one status transition, one recovery, one population run, or "make progress and report
+back." A successful 250-track batch is not a completion condition. Before returning to the user, Codex must run:
+
+```powershell
+uv run --offline spotify-taxonomy catalogue operator status
+```
+
+and continue whenever `next_action` is routine executable work: `generate_worklist`, `resume_population`,
+`recovery_verify`, `recovery_resolve_absent`, or a runbook-permitted managed-target provisioning step.
+
+Codex may return only for active provider quota with a still-applicable Retry-After, an unresolved safety condition
+that the supported recovery workflow cannot advance, a structural application error, actual catalogue completion, or
+an independent live writer that this task cannot monitor. For `wait_for_active_writer` owned by this task, retain and
+poll the mutation session until its actual subprocess exit, then rerun status; do not return while it is live.
+
 ## Single live mutation writer
 
 Several Codex chats or shells may inspect the same runtime, but exactly one may execute a guarded catalogue or
@@ -83,10 +104,11 @@ has several recovery records, status deliberately exposes no guessed pair.
    uv run --offline spotify-taxonomy catalogue classify batch import <CLASSIFICATION_BATCH.json>
    ```
 
-   Use `taxonomy.v2` and preserve canonical recording/version specificity. Vibe and Activity targets are unsplit.
-   Add Greek/Foreign only for defensible language routing when a Genre is included; routing never determines Genre.
-   Do not hallucinate from insufficient information. Where existing Phase 7 semantics permit, an explicit `abstain`
-   is preferable to repeatedly cycling a genuinely insufficient record.
+   Use `taxonomy.v2` and preserve canonical recording/version specificity. Do not create blanket 36-semantic
+   abstention matrices: classify every defensible Genre/Vibe/Activity semantic, and multiple includes are valid.
+   Vibe and Activity targets are unsplit. Add Greek/Foreign only for defensible language routing after a Genre is
+   included; routing never determines Genre. Do not hallucinate from insufficient information; use `abstain` only
+   where it is genuinely unsupported.
 
 5. Preview the corresponding guarded population run:
 
@@ -108,9 +130,22 @@ has several recovery records, status deliberately exposes no guessed pair.
    write, and performs mandatory provider read-back. A quota preserves confirmed work and stops. An ambiguous
    dispatched addition stops later writes and returns to step 2; it is never automatically retried or cleaned up.
 
-7. On `next_action: complete`, no persisted run needs attention and no unreviewed classification work remains.
-   Otherwise repeat this state machine. Stop only for quota, unresolved safety/recovery, a structural error, or
-   completion.
+7. Run operator status again after every routine transition, including a successful batch. Do not return to the user
+   after ordinary success. Continue this loop:
+
+   ```text
+   while true:
+       operator status
+       recovery action?      handle it; continue
+       resumable run?        resume it; wait for actual subprocess exit; continue
+       unreviewed work?      worklist -> recording-specific review -> import -> preview
+                             -> provision one exact missing target only when safely permitted -> apply; wait; continue
+       true stop condition?  return to user
+   ```
+
+   `next_action: complete` means no persisted run needs attention and no unreviewed classification work remains.
+   Stop only for quota, unresolved safety/recovery, a structural error, actual completion, or an independent writer
+   that cannot be monitored by this task.
 
 ## Status truthfulness
 

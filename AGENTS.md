@@ -72,6 +72,22 @@ These rules apply throughout this repository.
 - Never implement fake-human timing, anti-detection behavior, account/proxy rotation, fingerprint changes,
   CAPTCHA bypass, security-control bypass, or other enforcement evasion.
 
+## Catalogue operator completion gate
+
+- In a dedicated catalogue-operator task, `Resume` (or an equivalent request) is standing authorization for every
+  routine action permitted by `docs/catalogue-operator.md`. It means resume from persisted state and keep looping;
+  it never means perform one batch, one status transition, one recovery, or make some progress and return.
+- Before sending a final response, run `uv run --offline spotify-taxonomy catalogue operator status`. Continue when
+  its next action is routine executable work, including `generate_worklist`, `resume_population`, `recovery_verify`,
+  `recovery_resolve_absent`, or a supported managed-target provisioning step. A successful batch is not completion.
+- Return only for active provider quota, an unresolved safety condition requiring intervention, a structural
+  application error, actual catalogue completion, or an independent live writer that this task cannot monitor. If
+  `wait_for_active_writer` is this task's own mutation session, retain and wait for its actual subprocess exit, then
+  rerun status rather than returning.
+- Follow the runbook's recording-specific review rules: do not create blanket 36-semantic abstention matrices;
+  classify each defensible Genre/Vibe/Activity semantic, permit multiple includes, and use Genre routing only after a
+  Genre include.
+
 ## Development and verification
 
 - Keep ordinary unit tests offline, deterministic, and synthetic; no live service calls or credentials.
