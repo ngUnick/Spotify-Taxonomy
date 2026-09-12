@@ -87,6 +87,14 @@ These rules apply throughout this repository.
 - Follow the runbook's recording-specific review rules: do not create blanket 36-semantic abstention matrices;
   classify each defensible Genre/Vibe/Activity semantic, permit multiple includes, and use Genre routing only after a
   Genre include.
+- Prefer `scripts/catalogue-operator-exec.ps1` for a catalogue-operator command whose result matters to the state
+  machine. The wrapper keeps a local durable receipt and captured streams under the runtime data directory, so an
+  outer terminal runner losing output or its session handle is not itself a reason to retry or stop.
+- If an outer runner loses a command result, inspect the receipt with
+  `scripts/catalogue-operator-invocation-status.ps1`. A running or incomplete receipt is not an outcome: wait when
+  the child is known live; otherwise inspect the mutation lock and local operator status and remain fail-closed for
+  mutations. Never rerun a mutation merely because its outer runner lost output. A receipt never supersedes the
+  mutation journal, provider read-back, or recovery workflow.
 
 ## Development and verification
 

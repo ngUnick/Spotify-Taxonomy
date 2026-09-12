@@ -53,6 +53,45 @@ If a process crashes, the operating system releases its lock. That only permits 
 state; it never proves an in-flight Spotify write failed and never authorizes a retry. Existing durable journal and
 recovery procedures remain authoritative.
 
+## Durable command receipts
+
+For a catalogue-operator command whose result advances the state machine, prefer the local PowerShell wrapper. It
+creates a unique receipt before starting one child process, captures that child's stdout and stderr, waits for its
+actual termination, and records its observed exit code. Receipts are local operator artifacts under
+`<RUNTIME_DATA_DIR>\operator-invocations`; they are not Git artifacts and do not contain secrets.
+
+For example, wrap a persisted-run resume with the same runtime directory used by the child command:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/catalogue-operator-exec.ps1 `
+  -DataDir <RUNTIME_DATA_DIR> -Purpose catalogue-run-resume `
+  uv run spotify-taxonomy catalogue run resume <RUN_ID> --confirm RESUME:<RUN_ID> --data-dir <RUNTIME_DATA_DIR>
+```
+
+The wrapper writes `catalogue-operator-invocation-receipt.v1` metadata containing the invocation ID, sanitized command
+and purpose, wrapper state (`starting`, `running`, `finished`, or `failed_to_start`), child PID, start/end timestamps,
+observed exit code, and stdout/stderr paths. A fresh Codex session can inspect the latest receipt, or one exact
+invocation, without a database or provider call:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/catalogue-operator-invocation-status.ps1 `
+  -DataDir <RUNTIME_DATA_DIR>
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/catalogue-operator-invocation-status.ps1 `
+  -DataDir <RUNTIME_DATA_DIR> -InvocationId <INVOCATION_ID>
+```
+
+If the outer Codex command runner returns without usable output, first inspect this receipt. If the child remains live,
+retain the process/session and wait or poll. If the wrapper recorded `finished`, read the captured streams and use the
+recorded exit code. If the receipt is still incomplete and live-child status cannot be established, inspect the mutation
+lock and `catalogue operator status`; stay fail-closed for mutations. A wrapper crash leaves the receipt incomplete:
+it never fabricates termination or success. The receipt is observability only, never authority to retry a mutation or
+to infer a Spotify write outcome; the existing journal, read-back, and recovery state remain authoritative.
+
+For a local read-only/idempotent status or preview command, a retry may be considered only when the receipt establishes
+that no successful completion or mutation could have occurred and the command's existing semantics permit it. Lost
+outer-runner output alone never authorizes a mutation retry.
+
 ## State machine
 
 1. Start with the local-only command below. It performs no authentication, provider call, or mutation.
